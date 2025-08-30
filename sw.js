@@ -1,4 +1,4 @@
-const CACHE = 'vida-v3'; // ← bump
+const CACHE = 'vida-v4'; // bump
 const ASSETS = [
   'index.html','timers.html','notas.html','finanzas.html',
   'css/opal.css','js/firebase-init.js','js/utils.js','js/timers.js','js/notes.js','js/finanzas.js',
