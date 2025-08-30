@@ -4,22 +4,26 @@ const UI = {
   showCreateTimer(){ swapView('timer-create-view'); },
   backToList(){ CURRENT = null; swapView('timers-list-view'); renderList(); },
   async createTimer(){
-    const name = document.getElementById('newTimerName').value.trim();
-    const color = document.getElementById('newTimerColor').value;
-    if(!name) return;
-    const tid = id();
-    const data = { id:tid, name, color, createdAt: Date.now(), totalSec:0 };
-    await db.ref(`timers/${UID}/items/${tid}`).set(data);
-    document.getElementById('newTimerName').value='';
-    swapView('timers-list-view'); renderList();
+    try{
+      const name = document.getElementById('newTimerName').value.trim();
+      const color = document.getElementById('newTimerColor').value;
+      if(!name) return;
+      const tid = id();
+      const data = { id:tid, name, color, createdAt: Date.now(), totalSec:0 };
+      await db.ref(`timers/${UID}/items/${tid}`).set(data);
+      document.getElementById('newTimerName').value='';
+      swapView('timers-list-view'); renderList();
+    }catch(e){ console.error("crear timer", e); alert("No se pudo crear el temporizador."); }
   },
   openTimer(t){ CURRENT = t; populateDetail(t); swapView('timer-detail-view'); },
   async deleteCurrent(){
-    if(!CURRENT) return;
-    if(!confirm('¿Borrar temporizador?')) return;
-    await db.ref(`timers/${UID}/items/${CURRENT.id}`).remove();
-    await db.ref(`timers/${UID}/days/${CURRENT.id}`).remove();
-    this.backToList();
+    try{
+      if(!CURRENT) return;
+      if(!confirm('¿Borrar temporizador?')) return;
+      await db.ref(`timers/${UID}/items/${CURRENT.id}`).remove();
+      await db.ref(`timers/${UID}/days/${CURRENT.id}`).remove();
+      this.backToList();
+    }catch(e){ console.error("borrar timer", e); alert("No se pudo borrar."); }
   }
 };
 
@@ -35,32 +39,41 @@ function percentFromCreation(t){
 }
 
 async function renderList(){
-  const wrap = document.getElementById('timers-list');
-  wrap.innerHTML = '';
-  const snap = await db.ref(`timers/${UID}/items`).orderByChild('createdAt').get();
-  const list = [];
-  snap.forEach(s=>list.push(s.val()));
-  list.sort((a,b)=>b.createdAt-a.createdAt);
-  list.forEach(t=>{
-    const pct = percentFromCreation(t);
-    const card = document.createElement('div');
-    card.className='card';
-    card.style.borderColor = t.color;
-    card.innerHTML = `
-      <div class="row">
-        <div class="progress-ring" style="--p:${pct}; --ring:${t.color}"><span>${pct}%</span></div>
-        <div class="grow minw0">
-          <div class="row" style="gap:8px">
-            <div class="chip" style="background:${t.color}22;border-color:${t.color}44">${t.name}</div>
-            <div class="chip">Total: ${secsPretty(t.totalSec||0)}</div>
+  try{
+    const wrap = document.getElementById('timers-list');
+    wrap.innerHTML = '';
+    const snap = await db.ref(`timers/${UID}/items`).orderByChild('createdAt').once('value');
+    const list = [];
+    snap.forEach(s=>list.push(s.val()));
+    list.sort((a,b)=>b.createdAt-a.createdAt);
+    if(list.length===0){
+      const empty = document.createElement('div');
+      empty.className='card';
+      empty.innerHTML = `<div class="row"><div class="grow"></div><div class="muted">Sin temporizadores. Crea uno con “＋ Nuevo”.</div><div class="grow"></div></div>`;
+      wrap.appendChild(empty);
+      return;
+    }
+    list.forEach(t=>{
+      const pct = percentFromCreation(t);
+      const card = document.createElement('div');
+      card.className='card';
+      card.style.borderColor = t.color;
+      card.innerHTML = `
+        <div class="row">
+          <div class="progress-ring" style="--p:${pct}; --ring:${t.color}"><span>${pct}%</span></div>
+          <div class="grow minw0">
+            <div class="row" style="gap:8px">
+              <div class="chip" style="background:${t.color}22;border-color:${t.color}44">${t.name}</div>
+              <div class="chip">Total: ${secsPretty(t.totalSec||0)}</div>
+            </div>
+            <div class="muted" style="margin-top:6px">Creado: ${new Date(t.createdAt).toLocaleString()}</div>
           </div>
-          <div class="muted" style="margin-top:6px">Creado: ${new Date(t.createdAt).toLocaleString()}</div>
-        </div>
-        <button class="pill" style="background:${t.color}" data-id="${t.id}">Abrir</button>
-      </div>`;
-    card.querySelector('button').onclick = ()=>UI.openTimer(t);
-    wrap.appendChild(card);
-  });
+          <button class="pill" style="background:${t.color}" data-id="${t.id}">Abrir</button>
+        </div>`;
+      card.querySelector('button').onclick = ()=>UI.openTimer(t);
+      wrap.appendChild(card);
+    });
+  }catch(e){ console.error("render list", e); alert("No se pudieron cargar los temporizadores."); }
 }
 
 function populateDetail(t){
@@ -103,45 +116,48 @@ const Timers = {
     const today = ymd();
     const refDay = db.ref(`timers/${UID}/days/${CURRENT.id}/${today}`);
 
-    await refItem.transaction(it=>{
-      if(!it) return it;
-      it.totalSec = (it.totalSec||0) + elapsed;
-      return it;
-    });
-    await refDay.transaction(sec => (sec||0)+elapsed);
-
-    const fresh = (await refItem.get()).val();
-    CURRENT = fresh;
-    document.getElementById('totalPretty').textContent = secsPretty(CURRENT.totalSec||0);
-    const pct = percentFromCreation(CURRENT);
-    document.getElementById('dRing').style.setProperty('--p', pct);
-    document.getElementById('dPct').textContent = pct + '%';
-    drawDaily(CURRENT.id, CURRENT.color);
-    renderDailyList(CURRENT.id);
+    try{
+      await refItem.transaction(it=>{
+        if(!it) return it;
+        it.totalSec = (it.totalSec||0) + elapsed;
+        return it;
+      });
+      await refDay.transaction(sec => (sec||0)+elapsed);
+      const fresh = (await refItem.once('value')).val();
+      CURRENT = fresh;
+      document.getElementById('totalPretty').textContent = secsPretty(CURRENT.totalSec||0);
+      const pct = percentFromCreation(CURRENT);
+      document.getElementById('dRing').style.setProperty('--p', pct);
+      document.getElementById('dPct').textContent = pct + '%';
+      drawDaily(CURRENT.id, CURRENT.color);
+      renderDailyList(CURRENT.id);
+    }catch(e){ console.error("stop/save", e); alert("No se pudo guardar el tiempo."); }
   }
 };
 
 async function renderDailyList(timerId){
-  const wrap = document.getElementById('dailyList');
-  wrap.innerHTML='';
-  const snap = await db.ref(`timers/${UID}/days/${timerId}`).get();
-  const obj = snap.exists()? snap.val(): {};
-  const arr = Object.entries(obj).map(([date,sec])=>({date,sec}))
-               .sort((a,b)=>b.date.localeCompare(a.date));
-  arr.forEach(d=>{
-    const card=document.createElement('div');
-    card.className='card';
-    card.innerHTML=`<div class="row">
-      <div class="chip">${d.date}</div><div class="grow"></div>
-      <div class="chip">${secsPretty(d.sec)}</div>
-    </div>`;
-    wrap.appendChild(card);
-  });
+  try{
+    const wrap = document.getElementById('dailyList');
+    wrap.innerHTML='';
+    const snap = await db.ref(`timers/${UID}/days/${timerId}`).once('value');
+    const obj = snap.exists()? snap.val(): {};
+    const arr = Object.entries(obj).map(([date,sec])=>({date,sec}))
+                 .sort((a,b)=>b.date.localeCompare(a.date));
+    arr.forEach(d=>{
+      const card=document.createElement('div');
+      card.className='card';
+      card.innerHTML=`<div class="row">
+        <div class="chip">${d.date}</div><div class="grow"></div>
+        <div class="chip">${secsPretty(d.sec)}</div>
+      </div>`;
+      wrap.appendChild(card);
+    });
+  }catch(e){ console.error("daily list", e); }
 }
 
 function drawDaily(timerId, color){
   const ctx = document.getElementById('dailyChart').getContext('2d');
-  db.ref(`timers/${UID}/days/${timerId}`).get().then(s=>{
+  db.ref(`timers/${UID}/days/${timerId}`).once('value').then(s=>{
     const map = s.exists()? s.val(): {};
     const labels=[], data=[];
     for(let i=29;i>=0;i--){
@@ -156,7 +172,7 @@ function drawDaily(timerId, color){
       data:{ labels, datasets:[{ label:'Horas/día', data, backgroundColor: color+'aa' }]},
       options:{ responsive:true, scales:{ y:{ beginAtZero:true } } }
     });
-  });
+  }).catch(e=>console.error("chart", e));
 }
 
 document.addEventListener('DOMContentLoaded', renderList);
