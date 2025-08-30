@@ -1,29 +1,48 @@
 let CURRENT=null, TICK=null, RUN_START=null, CHART=null;
+const LS_KEY = ()=>`timers_${UID}`;
 
 const UI = {
   showCreateTimer(){ swapView('timer-create-view'); },
   backToList(){ CURRENT = null; swapView('timers-list-view'); renderList(); },
   async createTimer(){
-    try{
-      const name = document.getElementById('newTimerName').value.trim();
-      const color = document.getElementById('newTimerColor').value;
-      if(!name) return;
-      const tid = id();
-      const data = { id:tid, name, color, createdAt: Date.now(), totalSec:0 };
-      await db.ref(`timers/${UID}/items/${tid}`).set(data);
-      document.getElementById('newTimerName').value='';
-      swapView('timers-list-view'); renderList();
-    }catch(e){ console.error("crear timer", e); alert("No se pudo crear el temporizador."); }
+    const name = document.getElementById('newTimerName').value.trim();
+    const color = document.getElementById('newTimerColor').value;
+    if(!name) return;
+    const tid = id();
+    const data = { id:tid, name, color, createdAt: Date.now(), totalSec:0 };
+
+    // RTDB
+    let rtdbOK = true;
+    try{ await db.ref(`timers/${UID}/items/${tid}`).set(data); }
+    catch(e){ rtdbOK=false; console.error("RTDB set timers:", e); }
+
+    // Fallback LS (siempre guardo espejo)
+    const store = lsGet(LS_KEY(), {items:{}, days:{}});
+    store.items[tid] = data; lsSet(LS_KEY(), store);
+
+    document.getElementById('newTimerName').value='';
+    swapView('timers-list-view'); renderList();
+
+    if(!rtdbOK) alert("⚠️ Guardado offline (RTDB falló). Se sincronizará cuando funcione.");
   },
   openTimer(t){ CURRENT = t; populateDetail(t); swapView('timer-detail-view'); },
   async deleteCurrent(){
+    if(!CURRENT) return;
+    if(!confirm('¿Borrar temporizador?')) return;
+
+    let rtdbOK=true;
     try{
-      if(!CURRENT) return;
-      if(!confirm('¿Borrar temporizador?')) return;
       await db.ref(`timers/${UID}/items/${CURRENT.id}`).remove();
       await db.ref(`timers/${UID}/days/${CURRENT.id}`).remove();
-      this.backToList();
-    }catch(e){ console.error("borrar timer", e); alert("No se pudo borrar."); }
+    }catch(e){ rtdbOK=false; console.error("RTDB del:", e); }
+
+    const store = lsGet(LS_KEY(), {items:{}, days:{}});
+    delete store.items[CURRENT.id];
+    delete store.days?.[CURRENT.id];
+    lsSet(LS_KEY(), store);
+
+    this.backToList();
+    if(!rtdbOK) alert("⚠️ Borrado offline (RTDB falló).");
   }
 };
 
@@ -39,41 +58,53 @@ function percentFromCreation(t){
 }
 
 async function renderList(){
+  const wrap = document.getElementById('timers-list');
+  wrap.innerHTML = '';
+
+  let items = null;
   try{
-    const wrap = document.getElementById('timers-list');
-    wrap.innerHTML = '';
     const snap = await db.ref(`timers/${UID}/items`).orderByChild('createdAt').once('value');
-    const list = [];
-    snap.forEach(s=>list.push(s.val()));
-    list.sort((a,b)=>b.createdAt-a.createdAt);
-    if(list.length===0){
-      const empty = document.createElement('div');
-      empty.className='card';
-      empty.innerHTML = `<div class="row"><div class="grow"></div><div class="muted">Sin temporizadores. Crea uno con “＋ Nuevo”.</div><div class="grow"></div></div>`;
-      wrap.appendChild(empty);
-      return;
+    if(snap.exists()){
+      items = {}; snap.forEach(s=>{ items[s.key]=s.val(); });
+      // espejo LS
+      const store = lsGet(LS_KEY(), {items:{}, days:{}});
+      store.items = items; lsSet(LS_KEY(), store);
     }
-    list.forEach(t=>{
-      const pct = percentFromCreation(t);
-      const card = document.createElement('div');
-      card.className='card';
-      card.style.borderColor = t.color;
-      card.innerHTML = `
-        <div class="row">
-          <div class="progress-ring" style="--p:${pct}; --ring:${t.color}"><span>${pct}%</span></div>
-          <div class="grow minw0">
-            <div class="row" style="gap:8px">
-              <div class="chip" style="background:${t.color}22;border-color:${t.color}44">${t.name}</div>
-              <div class="chip">Total: ${secsPretty(t.totalSec||0)}</div>
-            </div>
-            <div class="muted" style="margin-top:6px">Creado: ${new Date(t.createdAt).toLocaleString()}</div>
+  }catch(e){ console.warn("RTDB read timers:", e); }
+
+  if(!items){
+    const store = lsGet(LS_KEY(), {items:{}, days:{}});
+    items = store.items;
+  }
+
+  const list = Object.values(items||{}).sort((a,b)=>b.createdAt-a.createdAt);
+  if(list.length===0){
+    const empty = document.createElement('div');
+    empty.className='card';
+    empty.innerHTML = `<div class="row"><div class="grow"></div><div class="muted">Sin temporizadores. Crea uno con “＋ Nuevo”.</div><div class="grow"></div></div>`;
+    wrap.appendChild(empty); return;
+  }
+
+  list.forEach(t=>{
+    const pct = percentFromCreation(t);
+    const card = document.createElement('div');
+    card.className='card';
+    card.style.borderColor = t.color;
+    card.innerHTML = `
+      <div class="row">
+        <div class="progress-ring" style="--p:${pct}; --ring:${t.color}"><span>${pct}%</span></div>
+        <div class="grow minw0">
+          <div class="row" style="gap:8px">
+            <div class="chip" style="background:${t.color}22;border-color:${t.color}44">${t.name}</div>
+            <div class="chip">Total: ${secsPretty(t.totalSec||0)}</div>
           </div>
-          <button class="pill" style="background:${t.color}" data-id="${t.id}">Abrir</button>
-        </div>`;
-      card.querySelector('button').onclick = ()=>UI.openTimer(t);
-      wrap.appendChild(card);
-    });
-  }catch(e){ console.error("render list", e); alert("No se pudieron cargar los temporizadores."); }
+          <div class="muted" style="margin-top:6px">Creado: ${new Date(t.createdAt).toLocaleString()}</div>
+        </div>
+        <button class="pill" style="background:${t.color}" data-id="${t.id}">Abrir</button>
+      </div>`;
+    card.querySelector('button').onclick = ()=>UI.openTimer(t);
+    wrap.appendChild(card);
+  });
 }
 
 function populateDetail(t){
@@ -116,49 +147,69 @@ const Timers = {
     const today = ymd();
     const refDay = db.ref(`timers/${UID}/days/${CURRENT.id}/${today}`);
 
+    let rtdbOK = true;
     try{
-      await refItem.transaction(it=>{
-        if(!it) return it;
-        it.totalSec = (it.totalSec||0) + elapsed;
-        return it;
-      });
+      await refItem.transaction(it=>{ if(!it) return it; it.totalSec = (it.totalSec||0) + elapsed; return it; });
       await refDay.transaction(sec => (sec||0)+elapsed);
-      const fresh = (await refItem.once('value')).val();
-      CURRENT = fresh;
-      document.getElementById('totalPretty').textContent = secsPretty(CURRENT.totalSec||0);
-      const pct = percentFromCreation(CURRENT);
-      document.getElementById('dRing').style.setProperty('--p', pct);
-      document.getElementById('dPct').textContent = pct + '%';
-      drawDaily(CURRENT.id, CURRENT.color);
-      renderDailyList(CURRENT.id);
-    }catch(e){ console.error("stop/save", e); alert("No se pudo guardar el tiempo."); }
+    }catch(e){ rtdbOK=false; console.error("RTDB tx:", e); }
+
+    // Mirror LS
+    const store = lsGet(LS_KEY(), {items:{}, days:{}});
+    store.items[CURRENT.id].totalSec = (store.items[CURRENT.id].totalSec||0) + elapsed;
+    store.days[CURRENT.id] = store.days[CURRENT.id] || {};
+    store.days[CURRENT.id][today] = (store.days[CURRENT.id][today]||0) + elapsed;
+    lsSet(LS_KEY(), store);
+
+    const fresh = store.items[CURRENT.id];
+    CURRENT = fresh;
+    document.getElementById('totalPretty').textContent = secsPretty(CURRENT.totalSec||0);
+    const pct = percentFromCreation(CURRENT);
+    document.getElementById('dRing').style.setProperty('--p', pct);
+    document.getElementById('dPct').textContent = pct + '%';
+    drawDaily(CURRENT.id, CURRENT.color);
+    renderDailyList(CURRENT.id);
+
+    if(!rtdbOK) alert("⚠️ Guardado offline (RTDB falló).");
   }
 };
 
 async function renderDailyList(timerId){
+  const wrap = document.getElementById('dailyList');
+  wrap.innerHTML='';
+  let obj = null;
   try{
-    const wrap = document.getElementById('dailyList');
-    wrap.innerHTML='';
     const snap = await db.ref(`timers/${UID}/days/${timerId}`).once('value');
-    const obj = snap.exists()? snap.val(): {};
-    const arr = Object.entries(obj).map(([date,sec])=>({date,sec}))
-                 .sort((a,b)=>b.date.localeCompare(a.date));
-    arr.forEach(d=>{
-      const card=document.createElement('div');
-      card.className='card';
-      card.innerHTML=`<div class="row">
-        <div class="chip">${d.date}</div><div class="grow"></div>
-        <div class="chip">${secsPretty(d.sec)}</div>
-      </div>`;
-      wrap.appendChild(card);
-    });
-  }catch(e){ console.error("daily list", e); }
+    if(snap.exists()) obj = snap.val();
+  }catch(e){ console.warn("RTDB days:", e); }
+  if(!obj){
+    const store = lsGet(LS_KEY(), {items:{}, days:{}});
+    obj = (store.days||{})[timerId] || {};
+  }
+  const arr = Object.entries(obj).map(([date,sec])=>({date,sec}))
+               .sort((a,b)=>b.date.localeCompare(a.date));
+  arr.forEach(d=>{
+    const card=document.createElement('div');
+    card.className='card';
+    card.innerHTML=`<div class="row">
+      <div class="chip">${d.date}</div><div class="grow"></div>
+      <div class="chip">${secsPretty(d.sec)}</div>
+    </div>`;
+    wrap.appendChild(card);
+  });
 }
 
 function drawDaily(timerId, color){
   const ctx = document.getElementById('dailyChart').getContext('2d');
-  db.ref(`timers/${UID}/days/${timerId}`).once('value').then(s=>{
-    const map = s.exists()? s.val(): {};
+  (async ()=>{
+    let map=null;
+    try{
+      const s=await db.ref(`timers/${UID}/days/${timerId}`).once('value');
+      if(s.exists()) map = s.val();
+    }catch(e){ console.warn("chart RTDB:", e); }
+    if(!map){
+      const store = lsGet(LS_KEY(), {items:{}, days:{}});
+      map = (store.days||{})[timerId] || {};
+    }
     const labels=[], data=[];
     for(let i=29;i>=0;i--){
       const d = new Date(); d.setDate(d.getDate()-i);
@@ -166,13 +217,9 @@ function drawDaily(timerId, color){
       labels.push(k.slice(5));
       data.push((map[k]||0)/3600);
     }
-    if(CHART){ CHART.destroy(); }
-    CHART = new Chart(ctx,{
-      type:'bar',
-      data:{ labels, datasets:[{ label:'Horas/día', data, backgroundColor: color+'aa' }]},
-      options:{ responsive:true, scales:{ y:{ beginAtZero:true } } }
-    });
-  }).catch(e=>console.error("chart", e));
+    if(CHART) CHART.destroy();
+    CHART = new Chart(ctx,{ type:'bar', data:{ labels, datasets:[{ label:'Horas/día', data }]}, options:{responsive:true,scales:{y:{beginAtZero:true}}} });
+  })();
 }
 
 document.addEventListener('DOMContentLoaded', renderList);
