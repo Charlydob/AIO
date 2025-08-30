@@ -2,90 +2,88 @@
 <html lang="es">
 <head>
   <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
   <title>Vida • Temporizadores</title>
   <link rel="stylesheet" href="css/opal.css"/>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<!-- Firebase compat (NO ESM) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-database-compat.js"></script>
-
-<!-- Tu init + utilidades -->
-<script src="js/firebase-init.js"></script>
-<script src="js/utils.js"></script>
-
-
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-database-compat.js"></script>
+  <script src="js/firebase-init.js"></script>
+  <script src="js/utils.js"></script>
 </head>
-<div class="shell">
 <body>
-<header class="app-bar">
-  <button class="icon-btn" onclick="history.back()">←</button>
-  <h1>Temporizadores</h1>
-  <button class="pill" onclick="UI.showCreateTimer()">＋ Nuevo</button>
-</header>
+<div class="shell">
+  <header class="app-bar">
+    <div class="bar-start"><button class="icon-btn" onclick="history.back()">←</button></div>
+    <h1>Temporizadores</h1>
+    <div class="bar-end"><button class="pill" onclick="UI.showCreateTimer()">＋ Nuevo</button></div>
+  </header>
 
-<main class="page">
-  <!-- Vista lista -->
-  <section id="timers-list-view" class="view active">
-    <div id="timers-list" class="card-column"></div>
-  </section>
+  <main class="page">
+    <!-- Lista -->
+    <section id="timers-list-view" class="view active">
+      <div id="timers-list" class="card-column"></div>
+    </section>
 
-  <!-- Vista crear -->
-  <section id="timer-create-view" class="view">
-    <div class="sheet">
-      <h2>Nuevo temporizador</h2>
-      <label class="field">
-        <span>Nombre</span>
-        <input id="newTimerName" placeholder="Ej. Vídeos YouTube"/>
-      </label>
-      <label class="field">
-        <span>Color</span>
-        <input id="newTimerColor" type="color" value="#3a86ff"/>
-      </label>
-      <div class="row">
-        <button class="pill ghost" onclick="UI.backToList()">Cancelar</button>
-        <button class="pill" onclick="UI.createTimer()">Crear</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- Vista detalle -->
-  <section id="timer-detail-view" class="view">
-    <div class="sheet">
-      <div class="row">
-        <button class="pill ghost" onclick="UI.backToList()">← Volver</button>
-        <div class="grow"></div>
-        <button id="deleteTimerBtn" class="pill danger" onclick="UI.deleteCurrent()">Borrar</button>
-      </div>
-      <h2 id="dTitle">Título</h2>
-      <p class="muted">Creado: <span id="dCreated"></span></p>
-
-      <div class="timer-hero" id="dHero" style="--accent:#3a86ff">
-        <div id="liveCounter">00:00:00</div>
+    <!-- Crear -->
+    <section id="timer-create-view" class="view">
+      <div class="sheet">
+        <h2>Nuevo temporizador</h2>
+        <label class="field">
+          <span>Nombre</span>
+          <input id="newTimerName" placeholder="Ej. Vídeos YouTube"/>
+        </label>
+        <label class="field">
+          <span>Color</span>
+          <input id="newTimerColor" type="color" value="#3a86ff"/>
+        </label>
         <div class="row">
-          <button id="startBtn" class="pill" onclick="Timers.start()">Iniciar</button>
-          <button id="stopBtn" class="pill warning" onclick="Timers.stop()" disabled>Parar</button>
+          <button class="pill ghost" onclick="UI.backToList()">Cancelar</button>
           <div class="grow"></div>
-          <div class="chip">Total: <span id="totalPretty">0h</span></div>
+          <button class="pill" onclick="UI.createTimer()">Crear</button>
         </div>
       </div>
+    </section>
 
-      <h3>Actividad diaria</h3>
-      <canvas id="dailyChart" height="200"></canvas>
+    <!-- Detalle -->
+    <section id="timer-detail-view" class="view">
+      <div class="sheet">
+        <div class="row">
+          <button class="pill ghost" onclick="UI.backToList()">← Volver</button>
+          <div class="grow"></div>
+          <button id="deleteTimerBtn" class="pill danger" onclick="UI.deleteCurrent()">Borrar</button>
+        </div>
+        <h2 id="dTitle">Título</h2>
+        <p class="muted">Creado: <span id="dCreated"></span></p>
 
-      <div id="dailyList" class="card-column"></div>
-    </div>
-  </section>
-</main>
+        <div class="timer-hero" id="dHero" style="--accent:#3a86ff">
+          <div class="row">
+            <div id="dRing" class="progress-ring" style="--p:0"><span id="dPct">0%</span></div>
+            <div class="grow"></div>
+          </div>
+          <div id="liveCounter" style="margin:8px 0 12px">00:00:00</div>
+          <div class="row">
+            <button id="startBtn" class="pill" onclick="Timers.start()">Iniciar</button>
+            <button id="stopBtn" class="pill warning" onclick="Timers.stop()" disabled>Parar</button>
+            <div class="grow"></div>
+            <div class="chip">Total: <span id="totalPretty">0h</span></div>
+          </div>
+        </div>
 
-<nav class="bottom-nav">
-  <a href="index.html">Inicio</a>
-  <a href="timers.html" class="active">Tempos</a>
-  <a href="notas.html">Notas</a>
-  <a href="finanzas.html">Finanzas</a>
-</nav>
+        <h3>Actividad diaria</h3>
+        <canvas id="dailyChart" height="200"></canvas>
+        <div id="dailyList" class="card-column"></div>
+      </div>
+    </section>
+  </main>
 
+  <nav class="bottom-nav">
+    <a href="index.html">Inicio</a>
+    <a href="timers.html" class="active">Tempos</a>
+    <a href="notas.html">Notas</a>
+    <a href="finanzas.html">Finanzas</a>
+  </nav>
+</div>
 <script src="js/timers.js"></script>
 </body>
-</div>
 </html>
