@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <title>Vida • Notas</title>
+  <link rel="stylesheet" href="css/opal.css"/>
+<!-- Firebase compat (NO ESM) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-database-compat.js"></script>
+
+<!-- Tu init + utilidades -->
+<script src="js/firebase-init.js"></script>
+<script src="js/utils.js"></script>
+
+</head>
+<body>
+<header class="app-bar">
+  <button class="icon-btn" onclick="history.back()">←</button>
+  <h1>Notas</h1>
+  <button class="pill" onclick="Notes.showCreate()">＋</button>
+</header>
+
+<main class="page">
+  <section id="notes-list" class="card-column"></section>
+
+  <!-- “página dentro de página” para crear/editar -->
+  <section id="note-editor" class="view">
+    <div class="sheet">
+      <h2 id="noteEditorTitle">Nueva nota</h2>
+      <label class="field"><span>Título</span><input id="nTitle"/></label>
+      <label class="field"><span>Etiqueta (coma para varias)</span><input id="nTags" placeholder="ideas, guion"/></label>
+      <label class="field"><span>Texto</span><textarea id="nBody" rows="6"></textarea></label>
+      <div class="row">
+        <button class="pill ghost" onclick="Notes.closeEditor()">Cancelar</button>
+        <div class="grow"></div>
+        <button id="nDelete" class="pill danger hidden" onclick="Notes.deleteNote()">Borrar</button>
+        <button class="pill" onclick="Notes.save()">Guardar</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav class="bottom-nav">
+  <a href="index.html">Inicio</a>
+  <a href="timers.html">Tempos</a>
+  <a href="notas.html" class="active">Notas</a>
+  <a href="finanzas.html">Finanzas</a>
+</nav>
+
+<script src="js/notes.js"></script>
+</body>
+</html>
