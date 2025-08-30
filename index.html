@@ -2,54 +2,53 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Vida • Home</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <meta name="theme-color" content="#0f1217"/>
   <link rel="apple-touch-icon" href="assets/icons/icon-192.png"/>
   <link rel="stylesheet" href="css/opal.css"/>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- Firebase compat -->
-<!-- Firebase compat (NO ESM) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-database-compat.js"></script>
-
-<!-- Tu init + utilidades -->
-<script src="js/firebase-init.js"></script>
-<script src="js/utils.js"></script>
-
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-database-compat.js"></script>
+  <script src="js/firebase-init.js"></script>
+  <script src="js/utils.js"></script>
 </head>
 <body>
+<div class="shell">
   <header class="app-bar">
     <h1>Vida</h1>
   </header>
 
   <main class="page">
-    <section class="card-grid">
-      <a class="card big" href="timers.html">
-        <div class="card-title">Temporizadores</div>
-        <div class="card-sub">Rastrea tu tiempo por áreas</div>
+    <section class="tiles">
+      <a class="tile" href="timers.html">
+        <div class="tile-icon">⏱️</div>
+        <div class="tile-body">
+          <h2>Temporizadores</h2>
+          <p>Cuenta tu tiempo por áreas</p>
+        </div>
       </a>
-      <a class="card big" href="notas.html">
-        <div class="card-title">Notas</div>
-        <div class="card-sub">Rápidas, con etiquetas</div>
+      <a class="tile" href="notas.html">
+        <div class="tile-icon">📝</div>
+        <div class="tile-body">
+          <h2>Notas</h2>
+          <p>Rápidas con etiquetas</p>
+        </div>
       </a>
-      <a class="card big" href="finanzas.html">
-        <div class="card-title">Finanzas</div>
-        <div class="card-sub">Gastos, ingresos, salario, % y gráficas</div>
+      <a class="tile" href="finanzas.html">
+        <div class="tile-icon">📈</div>
+        <div class="tile-body">
+          <h2>Finanzas</h2>
+          <p>Movimientos y gráficas</p>
+        </div>
       </a>
     </section>
   </main>
+</div>
 
-  <nav class="bottom-nav">
-    <a href="index.html" class="active">Inicio</a>
-    <a href="timers.html">Tempos</a>
-    <a href="notas.html">Notas</a>
-    <a href="finanzas.html">Finanzas</a>
-  </nav>
-
-  <script>
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
-  </script>
+<script>
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+</script>
 </body>
 </html>
