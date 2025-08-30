@@ -7,7 +7,7 @@
     storageBucket: "aio1-70674.firebasestorage.app",
     messagingSenderId: "776356971931",
     appId: "1:776356971931:web:743b5909eddb8b34bfcd3e",
-    // ⚠️ Comprueba en Firebase > Realtime Database > URL exacta:
+    // ⚠️ Comprueba esta URL exacta en Firebase > Realtime Database
     databaseURL: "https://aio1-70674-default-rtdb.europe-west1.firebasedatabase.app"
   };
 
@@ -22,14 +22,16 @@
   let UID = localStorage.getItem("vida_client_id");
   if(!UID){ UID = Math.random().toString(36).slice(2); localStorage.setItem("vida_client_id", UID); }
 
-  // Health-check de conexión y permisos
+  // Health-check: conexión y permisos
   const HC_PATH = `__health__/${UID}`;
+  db.ref(".info/connected").on("value", s=>{
+    console.log(s.val() ? "📶 Conectado a RTDB" : "🚫 Desconectado de RTDB");
+  });
   db.ref(HC_PATH).set({ts:Date.now()})
     .then(()=>db.ref(HC_PATH).remove())
-    .then(()=>console.log("✅ RTDB OK"))
+    .then(()=>console.log("✅ RTDB write OK"))
     .catch(err=>{
       console.error("❌ RTDB write/read fallo:", err);
-      alert("Firebase RTDB bloqueada o URL errónea. Revisa databaseURL y reglas.");
     });
 
   // Exponer global
