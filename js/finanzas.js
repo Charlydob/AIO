@@ -31,28 +31,32 @@ const Fin = {
   },
   closeEditor(){ closeEditor(); },
   async saveEntry(){
-    const entry = {
-      type: document.getElementById('eType').value||'gasto',
-      category: document.getElementById('eCat').value||'Otros',
-      date: document.getElementById('eDate').value || new Date().toISOString().slice(0,10),
-      amount: parseFloat(document.getElementById('eAmount').value||'0'),
-      note: document.getElementById('eNote').value||'',
-      ts: Date.now()
-    };
-    const base = `finance/${UID}/entries`;
-    if(EDIT_ID){
-      await db.ref(`${base}/${EDIT_ID}`).update(entry);
-    }else{
-      const eid=id();
-      await db.ref(`${base}/${eid}`).set({...entry,id:eid});
-    }
-    closeEditor(); loadEntries();
+    try{
+      const entry = {
+        type: document.getElementById('eType').value||'gasto',
+        category: document.getElementById('eCat').value||'Otros',
+        date: document.getElementById('eDate').value || new Date().toISOString().slice(0,10),
+        amount: parseFloat(document.getElementById('eAmount').value||'0'),
+        note: document.getElementById('eNote').value||'',
+        ts: Date.now()
+      };
+      const base = `finance/${UID}/entries`;
+      if(EDIT_ID){
+        await db.ref(`${base}/${EDIT_ID}`).update(entry);
+      }else{
+        const eid=id();
+        await db.ref(`${base}/${eid}`).set({...entry,id:eid});
+      }
+      closeEditor(); loadEntries();
+    }catch(e){ console.error("save entry", e); alert("No se pudo guardar el movimiento."); }
   },
   async deleteEntry(){
-    if(!EDIT_ID) return;
-    if(!confirm('¿Borrar movimiento?')) return;
-    await db.ref(`finance/${UID}/entries/${EDIT_ID}`).remove();
-    closeEditor(); loadEntries();
+    try{
+      if(!EDIT_ID) return;
+      if(!confirm('¿Borrar movimiento?')) return;
+      await db.ref(`finance/${UID}/entries/${EDIT_ID}`).remove();
+      closeEditor(); loadEntries();
+    }catch(e){ console.error("delete entry", e); alert("No se pudo borrar."); }
   },
   renderEntries(){
     const type = document.getElementById('fType').value;
@@ -61,6 +65,11 @@ const Fin = {
     wrap.innerHTML='';
     const list = Object.values(ENTRIES).sort((a,b)=>b.date.localeCompare(a.date))
       .filter(e=>(!type||e.type===type)&&(!cat||e.category===cat));
+    if(list.length===0){
+      const empty=document.createElement('div'); empty.className='card';
+      empty.innerHTML='<div class="muted">Sin movimientos. Pulsa ＋ para añadir.</div>';
+      wrap.appendChild(empty); return;
+    }
     list.forEach(e=>{
       const card=document.createElement('div'); card.className='card';
       card.innerHTML = `
@@ -85,12 +94,14 @@ function openEditor(){ document.getElementById('entry-editor').classList.add('ac
 function closeEditor(){ document.getElementById('entry-editor').classList.remove('active'); }
 
 async function loadEntries(){
-  const snap = await db.ref(`finance/${UID}/entries`).get();
-  ENTRIES = snap.exists()? snap.val(): {};
-  Fin.renderEntries();
-  updateStats();
-  drawNetWorth();
-  drawAnalytics();
+  try{
+    const snap = await db.ref(`finance/${UID}/entries`).once('value');
+    ENTRIES = snap.exists()? snap.val(): {};
+    Fin.renderEntries();
+    updateStats();
+    drawNetWorth();
+    drawAnalytics();
+  }catch(e){ console.error("load entries", e); alert("No se pudieron cargar los datos."); }
 }
 
 function updateStats(){
