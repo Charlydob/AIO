@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0f1217"/>
   <link rel="apple-touch-icon" href="assets/icons/icon-192.png"/>
   <link rel="stylesheet" href="css/opal.css"/>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-database-compat.js"></script>
   <script src="js/firebase-init.js"></script>
@@ -17,32 +17,17 @@
 <body>
 <div class="shell">
   <header class="app-bar">
+    <div class="bar-start"></div>
     <h1>Vida</h1>
+    <div class="bar-end"></div>
   </header>
 
   <main class="page">
     <section class="tiles">
-      <a class="tile" href="timers.html">
-        <div class="tile-icon">⏱️</div>
-        <div class="tile-body">
-          <h2>Temporizadores</h2>
-          <p>Cuenta tu tiempo por áreas</p>
-        </div>
-      </a>
-      <a class="tile" href="notas.html">
-        <div class="tile-icon">📝</div>
-        <div class="tile-body">
-          <h2>Notas</h2>
-          <p>Rápidas con etiquetas</p>
-        </div>
-      </a>
-      <a class="tile" href="finanzas.html">
-        <div class="tile-icon">📈</div>
-        <div class="tile-body">
-          <h2>Finanzas</h2>
-          <p>Movimientos y gráficas</p>
-        </div>
-      </a>
+      <a class="tile" href="timers.html"><h2>Temporizadores</h2></a>
+      <a class="tile" href="notas.html"><h2>Notas</h2></a>
+      <a class="tile" href="finanzas.html"><h2>Finanzas</h2></a>
+      <!-- espacio para futuras secciones -->
     </section>
   </main>
 </div>
