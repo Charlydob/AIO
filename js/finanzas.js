@@ -30,7 +30,7 @@ const Fin = {
     openEditor();
   },
   closeEditor(){ closeEditor(); },
-  saveEntry(){
+  async saveEntry(){
     const entry = {
       type: document.getElementById('eType').value||'gasto',
       category: document.getElementById('eCat').value||'Otros',
@@ -39,25 +39,27 @@ const Fin = {
       note: document.getElementById('eNote').value||'',
       ts: Date.now()
     };
-    const ref = db.ref(`finance/${UID}/entries`);
+    const base = `finance/${UID}/entries`;
     if(EDIT_ID){
-      ref.child(EDIT_ID).update(entry).then(()=>{ closeEditor(); loadEntries(); });
+      await db.ref(`${base}/${EDIT_ID}`).update(entry);
     }else{
       const eid=id();
-      ref.child(eid).set({...entry,id:eid}).then(()=>{ closeEditor(); loadEntries(); });
+      await db.ref(`${base}/${eid}`).set({...entry,id:eid});
     }
+    closeEditor(); loadEntries();
   },
-  deleteEntry(){
+  async deleteEntry(){
     if(!EDIT_ID) return;
     if(!confirm('¿Borrar movimiento?')) return;
-    db.ref(`finance/${UID}/entries/${EDIT_ID}`).remove().then(()=>{ closeEditor(); loadEntries(); });
+    await db.ref(`finance/${UID}/entries/${EDIT_ID}`).remove();
+    closeEditor(); loadEntries();
   },
   renderEntries(){
     const type = document.getElementById('fType').value;
     const cat = document.getElementById('fCat').value;
     const wrap = document.getElementById('entriesList');
     wrap.innerHTML='';
-    const list = Object.values(ENTRIES).sort((a,b)=>a.date.localeCompare(b.date)).reverse()
+    const list = Object.values(ENTRIES).sort((a,b)=>b.date.localeCompare(a.date))
       .filter(e=>(!type||e.type===type)&&(!cat||e.category===cat));
     list.forEach(e=>{
       const card=document.createElement('div'); card.className='card';
@@ -82,14 +84,13 @@ const Fin = {
 function openEditor(){ document.getElementById('entry-editor').classList.add('active'); }
 function closeEditor(){ document.getElementById('entry-editor').classList.remove('active'); }
 
-function loadEntries(){
-  db.ref(`finance/${UID}/entries`).once('value', snap=>{
-    ENTRIES = {}; snap.forEach(s=>ENTRIES[s.key]=s.val());
-    Fin.renderEntries();
-    updateStats();
-    drawNetWorth();
-    drawAnalytics();
-  });
+async function loadEntries(){
+  const snap = await db.ref(`finance/${UID}/entries`).get();
+  ENTRIES = snap.exists()? snap.val(): {};
+  Fin.renderEntries();
+  updateStats();
+  drawNetWorth();
+  drawAnalytics();
 }
 
 function updateStats(){
@@ -111,7 +112,6 @@ function updateStats(){
 }
 
 function sumNetWorth(){
-  // Patrimonio aproximado = sum(ingreso+salario+inversion) - sum(gasto)
   let s=0;
   Object.values(ENTRIES).forEach(e=>{
     if(e.type==='ingreso'||e.type==='salario'||e.type==='inversion') s+=e.amount;
@@ -123,7 +123,6 @@ function sumNetWorth(){
 function drawNetWorth(){
   const ctx = document.getElementById('netWorthChart').getContext('2d');
   const days=90, labels=[], data=[]; let acc=0;
-  // construir cronológico
   const map={};
   Object.values(ENTRIES).forEach(e=>{
     map[e.date] = (map[e.date]||0) + (e.type==='gasto' ? -e.amount : e.amount);
@@ -140,7 +139,6 @@ function drawNetWorth(){
 }
 
 function drawAnalytics(){
-  // Ingresos vs Gastos (últimos 30 días)
   const ctx1 = document.getElementById('incExpChart').getContext('2d');
   const ctx2 = document.getElementById('catPieChart').getContext('2d');
   const from = new Date(); from.setDate(from.getDate()-30);
