@@ -248,3 +248,13 @@ select#displayCurrency{ background:#101826; color:#d9e2f1; border:1px solid #1a2
 .tabs{ margin:8px 0 12px; }                       /* separa tabs del resto */
 .stats{ margin-top:4px; }                         /* chips de resumen tras título */
 .card-column{ gap:12px; }                         /* listas dentro de secciones */
+/* FAB en Finanzas */
+.fab{
+  position:fixed; right:20px; bottom:calc(var(--nav-h) + 16px); z-index:6;
+  width:56px; height:56px; border-radius:50%;
+  display:grid; place-items:center; font-size:24px; line-height:1;
+  color:#fff; border:1px solid #3568aa;
+  background:linear-gradient(180deg,#59adff,#3a86ff);
+  box-shadow:0 8px 24px rgba(58,134,255,.30);
+}
+.fab:active{ transform:scale(.98); }

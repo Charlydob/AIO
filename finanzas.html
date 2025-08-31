@@ -89,6 +89,8 @@
           <select id="fAcc" onchange="Fin.renderEntries()">
             <option value="">Cuenta: todas</option>
           </select>
+          <!-- Buscador global de movimientos -->
+          <input id="fSearch" class="field" placeholder="Buscar… (texto, importe, categoría, cuenta)" oninput="Fin.renderEntries()" style="flex:1;min-width:140px">
           <div class="grow"></div>
           <button class="pill" onclick="Fin.showAdd()">＋ Movimiento</button>
         </div>
@@ -160,6 +162,11 @@
 
         <canvas id="accChart" height="180" style="margin-top:10px"></canvas>
 
+        <!-- Buscador específico de esta cuenta (solo para cuentas normales) -->
+        <div class="row wrap" id="accSearchWrap" style="margin-top:8px">
+          <input id="accSearch" class="field" placeholder="Buscar en esta cuenta…" oninput="Fin.resetAndReloadAccountMovs()" style="flex:1;min-width:140px">
+        </div>
+
         <!-- NORMAL: lista de movimientos (lazy) -->
         <div id="accMovs" class="card-column" style="margin-top:10px"></div>
         <div class="row" id="accMoreWrap" style="margin-top:8px">
@@ -179,20 +186,23 @@
         </div>
       </div>
     </section>
-    <!-- MODAL GENÉRICO -->
-<div id="modalBackdrop" class="modal-backdrop hidden" onclick="closeModal()"></div>
-<div id="modal" class="modal hidden" role="dialog" aria-modal="true">
-  <div class="modal-card">
-    <div class="modal-title" id="modalTitle">Título</div>
-    <div class="modal-body" id="modalBody"></div>
-    <div class="row" style="margin-top:12px">
-      <button class="pill ghost" onclick="closeModal()">Cancelar</button>
-      <div class="grow"></div>
-      <button class="pill" id="modalPrimary">Aceptar</button>
-    </div>
-  </div>
-</div>
 
+    <!-- MODAL GENÉRICO -->
+    <div id="modalBackdrop" class="modal-backdrop hidden" onclick="closeModal()"></div>
+    <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-card">
+        <div class="modal-title" id="modalTitle">Título</div>
+        <div class="modal-body" id="modalBody"></div>
+        <div class="row" style="margin-top:12px">
+          <button class="pill ghost" onclick="closeModal()">Cancelar</button>
+          <div class="grow"></div>
+          <button class="pill" id="modalPrimary">Aceptar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- FAB Movimiento rápido -->
+    <button class="fab" id="finFab" onclick="Fin.quickAddMovement()" title="Nuevo movimiento">＋</button>
 
   </main>
 
