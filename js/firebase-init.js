@@ -69,34 +69,67 @@
 })();
 
 // Forzar actualización: actualiza SW, limpia cachés y recarga con cache-busting
+let _forcingUpdate = false;
+
 async function forceUpdate() {
+  if (_forcingUpdate) return;
+  _forcingUpdate = true;
+
+  const waitControllerChange = () => new Promise(res => {
+    navigator.serviceWorker.addEventListener('controllerchange', () => res(), { once: true });
+  });
+
   try {
-    // 1) Intentar activar el SW nuevo (si lo hay)
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.getRegistration();
-      if (reg) {
-        await reg.update(); // busca versión nueva de sw.js
-        if (reg.waiting) {
+
+      const activateWaiting = async () => {
+        if (reg?.waiting) {
           reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-          await new Promise(res => {
-            navigator.serviceWorker.addEventListener('controllerchange', () => res(), { once: true });
-          });
+          await waitControllerChange();
         }
+      };
+
+      if (reg) {
+        await activateWaiting();     // activa si ya había update
+        await reg.update();          // busca sw nuevo
+        await activateWaiting();     // activa si tras update hay waiting
       }
     }
 
-    // 2) Borrar TODAS las cachés (las de tu app)
-    if (window.caches?.keys) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map(k => caches.delete(k)));
-    }
+    // pedir al SW que limpie caches (rápido) con fallback desde la página
+    let cleared = false;
+    const onMsg = (e) => {
+      if (e.data?.type === 'CACHES_CLEARED') {
+        cleared = true;
+        window.removeEventListener('message', onMsg);
+        hardReload();
+      }
+    };
+    window.addEventListener('message', onMsg);
 
-    // 3) Recarga con "cache-buster" para forzar HTML/CSS/JS frescos
+    navigator.serviceWorker.controller?.postMessage({ type: 'CLEAR_CACHES' });
+
+    // fallback si el SW no responde a tiempo
+    setTimeout(async () => {
+      if (!cleared && window.caches?.keys) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+      if (!cleared) hardReload();
+    }, 1500);
+
+  } catch {
+    location.reload();
+  } finally {
+    // se resetea tras recargar, sirve para evitar dobles toques
+    setTimeout(() => { _forcingUpdate = false; }, 0);
+  }
+
+  function hardReload() {
     const u = new URL(location.href);
     u.searchParams.set('hard', Date.now());
     location.replace(u.toString());
-  } catch (e) {
-    // fallback por si algo falla
-    location.reload();
   }
 }
+
