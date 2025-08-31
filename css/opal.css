@@ -139,3 +139,55 @@ canvas{max-width:100%;height:auto!important;border-radius:12px;border:1px solid 
   position:relative;font-size:12px;color:rgb(255, 255, 255);
   z-index:1; /* delante */
 }
+/* === Timers: tarjetas compactas y ordenadas === */
+
+/* 3 columnas: anillo | meta (nombre+chips+fecha) | botones */
+#timers-list .card > .row{
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  align-items:center;
+  gap:12px;
+}
+
+/* Anillo más compacto en lista */
+#timers-list .progress-ring{ width:40px; height:40px; }
+
+/* Área central: evita saltos y cortes feos */
+#timers-list .grow.minw0{ min-width:0; }
+#timers-list .row[style*="gap:8px"]{ /* contenedor chips (nombre/total/Live) */
+  flex-wrap:nowrap;
+  overflow:hidden;
+}
+#timers-list .row[style*="gap:8px"] .chip{
+  max-width:100%;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+/* El primer chip (nombre) prioriza anchura; los demás se recortan antes */
+#timers-list .row[style*="gap:8px"] .chip:first-child{
+  max-width:60%;
+}
+
+/* Fecha más discreta */
+#timers-list .muted{ font-size:12px; opacity:.9; }
+
+/* Grupo de botones: tamaño pequeño, sin desbordar ni romper filas */
+#timers-list .row[style*="gap:6px"]{
+  gap:8px;
+  flex-wrap:nowrap;
+}
+#timers-list .row[style*="gap:6px"] .pill{
+  padding:8px 12px;
+  font-size:13px;
+  white-space:nowrap;
+}
+
+/* Evita que el borde de la card destaque demasiado (look más “Opal”) */
+#timers-list .card{
+  border-color: #1a2230;
+  background: linear-gradient(180deg, rgba(22,30,45,.85), rgba(14,20,31,.68));
+}
+
+/* Dashboard: pequeño respiro visual respecto a la lista */
+#dashWrap{ margin-bottom:14px; }
