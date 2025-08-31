@@ -68,3 +68,35 @@
   });
 })();
 
+// Forzar actualización: actualiza SW, limpia cachés y recarga con cache-busting
+async function forceUpdate() {
+  try {
+    // 1) Intentar activar el SW nuevo (si lo hay)
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        await reg.update(); // busca versión nueva de sw.js
+        if (reg.waiting) {
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          await new Promise(res => {
+            navigator.serviceWorker.addEventListener('controllerchange', () => res(), { once: true });
+          });
+        }
+      }
+    }
+
+    // 2) Borrar TODAS las cachés (las de tu app)
+    if (window.caches?.keys) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+
+    // 3) Recarga con "cache-buster" para forzar HTML/CSS/JS frescos
+    const u = new URL(location.href);
+    u.searchParams.set('hard', Date.now());
+    location.replace(u.toString());
+  } catch (e) {
+    // fallback por si algo falla
+    location.reload();
+  }
+}
