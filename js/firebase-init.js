@@ -51,3 +51,20 @@
     await softCopy('/finance/entries',  `finance/${UID}/entries`);
   })();
 })();
+
+(() => {
+  if (!('serviceWorker' in navigator)) return;
+  const v = 'v2025-08-31-1'; // cambia en cada deploy
+  navigator.serviceWorker.register('./sw.js?' + v).then(reg => {
+    reg.addEventListener('updatefound', () => {
+      const nw = reg.installing;
+      nw && nw.addEventListener('statechange', () => {
+        if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+          reg.waiting?.postMessage({ type: 'SKIP_WAITING' });
+        }
+      });
+    });
+    navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+  });
+})();
+
