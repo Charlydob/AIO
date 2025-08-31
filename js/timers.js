@@ -3,6 +3,28 @@
 let CURRENT = null, TICK = null, RUN_START = null, CHART = null;
 let PIE = null, DASH_OFFSET = 0; // 0 = hoy, -1 = ayer...
 const LS_KEY = () => `timers_${UID}`;
+let ACTIVITY_MODE = 'bar';
+
+function setActivityMode(mode){
+  const toGrid = (mode === 'grid');
+  ACTIVITY_MODE = toGrid ? 'grid' : 'bar';
+
+  // Tabs activos
+  document.getElementById('tabBar') ?.classList.toggle('active', !toGrid);
+  document.getElementById('tabGrid')?.classList.toggle('active',  toGrid);
+
+  // Mostrar uno y ocultar el otro
+  const cBar  = document.getElementById('dailyChart');
+  const cGrid = document.getElementById('dailyHeat');
+  cBar ?.classList.toggle('hidden', toGrid);
+  cGrid?.classList.toggle('hidden', !toGrid);
+
+  // liberamos el chart de barras si ocultamos
+  if (toGrid && CHART){ CHART.destroy(); CHART = null; }
+
+  // Redibujar solo si hay timer abierto
+  if (CURRENT) drawActivity(CURRENT.id, CURRENT.color);
+}
 
 // ===================== UI =====================
 const UI = {
@@ -172,7 +194,7 @@ function populateDetail(t){
   document.getElementById('dRing').style.setProperty('--ring', t.color);
   document.getElementById('dPct').textContent = pct + '%';
 
-  drawDaily(t.id, t.color);
+drawActivity(t.id, t.color);
   renderDailyList(t.id);
 }
 
@@ -227,7 +249,7 @@ const Timers = {
     document.getElementById('dRing').style.setProperty('--p', pct);
     document.getElementById('dPct').textContent = pct + '%';
 
-    drawDaily(CURRENT.id, CURRENT.color);
+drawActivity(CURRENT.id, CURRENT.color);
     renderDailyList(CURRENT.id);
     drawDashboard();
   },
@@ -325,9 +347,14 @@ async function renderDailyList(timerId){
     wrap.appendChild(card);
   });
 }
-
-function drawDaily(timerId, color){
-  const ctx = document.getElementById('dailyChart').getContext('2d');
+function drawActivity(timerId, color){
+  if (ACTIVITY_MODE === 'grid') drawDailyHeat(timerId);
+  else drawDailyBar(timerId, color);
+}
+// === Barras (tu drawDaily original, renombrado) ===
+function drawDailyBar(timerId, color){
+  const ctx = document.getElementById('dailyChart')?.getContext('2d');
+  if(!ctx) return;
   (async ()=>{
     let map=null;
     try{
@@ -349,6 +376,128 @@ function drawDaily(timerId, color){
     CHART = new Chart(ctx,{ type:'bar', data:{ labels, datasets:[{ label:'Horas/día', data }]}, options:{responsive:true,scales:{y:{beginAtZero:true}}} });
   })();
 }
+
+// === Mosaico estilo GitHub — centrado, responsive y meses abreviados (ago, sep, ...) ===
+// === Mosaico tipo GitHub — centrado, contraste mejorado y mes centrado en su tramo ===
+async function drawDailyHeat(timerId){
+  const canvas = document.getElementById('dailyHeat');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  // --- datos ------------------------------------------------------------
+  let map=null;
+  try{
+    const s=await db.ref(`timers/${UID}/days/${timerId}`).once('value');
+    if(s.exists()) map = s.val();
+  }catch(e){ console.warn("heat RTDB:", e); }
+  if(!map){
+    const store = lsGet(LS_KEY(), {items:{}, days:{}});
+    map = (store.days||{})[timerId] || {};
+  }
+
+  // --- layout responsive ------------------------------------------------
+  const weeks   = 20;       // columnas (ajusta si quieres)
+  const rows    = 7;        // L..D
+  const gap     = 3;        // espacio entre celdas
+  const sidePad = 8;        // margen lateral
+  const topPad  = 22;       // espacio superior para etiquetas de mes
+
+  // ancho CSS del contenedor
+  const container = canvas.parentElement || canvas;
+  const cssW = Math.max(220, Math.floor(container.getBoundingClientRect().width));
+
+  // calcula tamaño de celda para que encaje
+  const cell = Math.max(8, Math.floor((cssW - sidePad*2 - (weeks+1)*gap) / weeks));
+  const gridW = weeks*cell + (weeks+1)*gap;
+  const gridH = rows*cell  + (rows+1)*gap;
+
+  // centrado horizontal
+  const left = Math.max(sidePad, Math.floor((cssW - gridW)/2));
+  const top  = topPad;
+
+  // HiDPI nítido
+  const dpr = window.devicePixelRatio || 1;
+  const cssH = top + gridH + gap;
+  canvas.style.width  = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  canvas.width  = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,cssW,cssH);
+
+  // --- paleta niveles (0 más visible para que se vea TODA la cuadrícula) ---
+  const shades = ['#1a2331', '#16351e', '#1f5a2c', '#2b8a3b', '#36b24b']; // 0 más claro
+  const L1 = 15*60, L2 = 60*60, L3 = 2*60*60, L4 = 4*60*60;
+
+  // --- calendario semanal anclado a lunes -----------------------------------
+  const today   = new Date();
+  const weekday = (today.getDay() + 6) % 7; // 0=lun ... 6=dom
+  const monday  = new Date(today); monday.setDate(today.getDate() - weekday);
+
+  // Primero calculamos metadatos de columnas (para poder centrar etiquetas de mes)
+  const colsMeta = []; // [{x, month, date: lunesDeEsaCol}]
+  for (let c = weeks-1; c >= 0; c--) { // derecha -> izquierda
+    const colStart = new Date(monday);
+    colStart.setDate(monday.getDate() - (weeks-1 - c)*7); // lunes de esa semana
+    const x = left + c*(cell+gap) + gap;
+    colsMeta.push({ x, month: colStart.getMonth(), date: colStart });
+  }
+
+  // Dibuja celdas (toda la cuadrícula visible)
+  for (let i = 0; i < colsMeta.length; i++){
+    const { x, date: colStart } = colsMeta[i];
+    for (let r = 0; r < rows; r++) {
+      const d = new Date(colStart); d.setDate(colStart.getDate() + r);
+      const key = ymd(d);
+      const sec = map[key] || 0;
+
+      let lvl = 0;
+      if (sec > 0)  lvl = 1;
+      if (sec > L1) lvl = 2;
+      if (sec > L2) lvl = 3;
+      if (sec > L3) lvl = 4;
+
+      const y = top + r*(cell+gap) + gap;
+      ctx.fillStyle = shades[lvl];
+      ctx.fillRect(x, y, cell, cell);
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)'; // borde más marcado
+      ctx.strokeRect(x+0.5, y+0.5, cell-1, cell-1);
+    }
+  }
+
+  // Etiquetas de mes: agrupamos columnas contiguas por mes y rotulamos en el centro
+  ctx.textBaseline = 'top';
+  ctx.font = '11px ui-sans-serif, system-ui, Segoe UI, Roboto, Arial';
+  ctx.fillStyle = 'rgba(233,238,248,.85)';
+
+  let runStart = 0;
+  for (let i = 1; i <= colsMeta.length; i++){
+    const currMonth = colsMeta[i-1].month;
+    const nextMonth = (i<colsMeta.length) ? colsMeta[i].month : -999;
+    if (currMonth !== nextMonth) {
+      // tramo [runStart .. i-1] del mismo mes
+      const xStart = colsMeta[runStart].x;
+      const xEnd   = colsMeta[i-1].x + cell; // fin de la última celda del tramo
+      const cx     = xStart + (xEnd - xStart)/2;
+
+      let mStr = colsMeta[runStart].date.toLocaleString('es-ES', { month:'short' }).replace('.','');
+      mStr = mStr.slice(0,3).toLowerCase(); // "ago", "sep", ...
+
+      // evita cortar en bordes
+      const txtW = ctx.measureText(mStr).width;
+      const drawX = Math.min(Math.max(cx - txtW/2, sidePad), cssW - sidePad - txtW);
+      ctx.fillText(mStr, drawX, 4);
+
+      // separador sutil al inicio del tramo (como guía de cambio de mes)
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(xStart - Math.floor(gap/2), top-2, 1, gridH + gap);
+      ctx.fillStyle = 'rgba(233,238,248,.85)';
+
+      runStart = i; // siguiente tramo
+    }
+  }
+}
+
 
 // ===================== Dashboard (pie) =====================
 async function drawDashboard(){
