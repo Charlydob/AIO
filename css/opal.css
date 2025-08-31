@@ -191,3 +191,60 @@ canvas{max-width:100%;height:auto!important;border-radius:12px;border:1px solid 
 
 /* Dashboard: pequeño respiro visual respecto a la lista */
 #dashWrap{ margin-bottom:14px; }
+/* === Finanzas: cuentas y vista detalle === */
+.account-grid{
+  display:grid; grid-template-columns: repeat(2, minmax(0,1fr));
+  gap:10px;
+}
+@media (min-width:560px){
+  .account-grid{ grid-template-columns: repeat(3, minmax(0,1fr)); }
+}
+.account-card{
+  display:flex; flex-direction:column; gap:6px;
+  padding:12px; border-radius:12px;
+  background: linear-gradient(180deg, rgba(22,30,45,.85), rgba(14,20,31,.68));
+  border:1px solid #1a2230;
+}
+.account-head{ display:flex; align-items:center; gap:8px; }
+.account-swatch{ width:12px; height:12px; border-radius:50%; border:1px solid #ffffff22; }
+.account-name{ font-weight:600; }
+.account-balance{ font-size:16px; font-weight:600; }
+.account-type{ font-size:12px; opacity:.8; }
+
+.big-balance{ font-size:28px; font-weight:700; }
+.delta-badge{ font-size:13px; padding:4px 8px; border-radius:999px; }
+.delta-badge.up{ background:#1b3325; border:1px solid #2a6746; color:#9de7c6; }
+.delta-badge.down{ background:#3a1e24; border:1px solid #7a3a44; color:#ffc1c8; }
+
+.tabs .tab.active{ font-weight:600; }
+
+#entry-editor .field input, #entry-editor .field select { width:100%; }
+
+.card .muted{ font-size:12px; }
+
+select#displayCurrency{ background:#101826; color:#d9e2f1; border:1px solid #1a2230; padding:6px 8px; border-radius:8px; }
+/* === Modal Opal === */
+.modal-backdrop{ position:fixed; inset:0; background:rgba(5,8,14,.6); backdrop-filter: blur(2px); z-index:1000; }
+.modal{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:1001; }
+.modal-card{
+  width:min(520px, calc(100vw - 32px));
+  background:linear-gradient(180deg, rgba(22,30,45,.95), rgba(14,20,31,.92));
+  border:1px solid #1a2230; border-radius:14px; padding:16px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.4);
+}
+.modal-title{ font-weight:700; font-size:18px; margin-bottom:10px; }
+.modal-body .field{ margin-bottom:10px; }
+.modal-body input, .modal-body select{ width:100%; }
+.hidden{ display:none !important; }
+/* === Ritmo vertical (≥8px) en páginas === */
+.page > * + *{ margin-top:12px; }                 /* entre contenedores apilados */
+.sheet + .sheet,
+.sheet + .card,
+.card + .sheet{ margin-top:12px; }                /* combos comunes */
+.view .sheet:not(:last-child){ margin-bottom:12px; }
+
+/* Finanzas: respirito extra */
+#accountsSheet{ margin-bottom:12px; }
+.tabs{ margin:8px 0 12px; }                       /* separa tabs del resto */
+.stats{ margin-top:4px; }                         /* chips de resumen tras título */
+.card-column{ gap:12px; }                         /* listas dentro de secciones */

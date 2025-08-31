@@ -5,9 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
   <title>Vida • Finanzas</title>
   <link rel="stylesheet" href="css/opal.css"/>
-      <!-- 1) UID común (igual en todas las páginas) -->
   <script>window.FIXED_UID='charly';</script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-database-compat.js"></script>
   <script src="js/firebase-init.js"></script>
@@ -16,26 +15,56 @@
 <body>
 <div class="shell">
   <header class="app-bar">
-    <div class="bar-start"><button class="icon-btn" onclick="history.back()">←</button></div>
+    <div class="bar-start"><a class="icon-btn" href="index.html">←</a></div>
     <h1>Finanzas</h1>
-    <div class="bar-end"><button class="pill" onclick="Fin.showAdd()">＋</button></div>
+    <div class="bar-end">
+      <select id="displayCurrency" onchange="Fin.setDisplayCurrency(this.value)" title="Moneda de visualización">
+        <option>EUR</option><option>USD</option><option>GBP</option>
+      </select>
+    </div>
   </header>
 
   <main class="page">
+
+    <!-- CUENTAS (encima de los chips de resumen) -->
+    <section class="sheet" id="accountsSheet">
+      <div class="row" style="align-items:center">
+        <h3 style="margin:0">Cuentas</h3>
+        <div class="grow"></div>
+        <button class="pill" onclick="Fin.showAddAccount()">＋</button>
+      </div>
+      <div id="accountsList" class="account-grid"></div>
+    </section>
+
+    <!-- RESUMEN GLOBAL -->
+    <section class="sheet">
+      <div class="stats wrap">
+        <div class="stat"><div class="label">Patrimonio</div><div id="stNet" class="value">0 €</div></div>
+        <div class="stat"><div class="label">Ingresos (rango)</div><div id="stInc" class="value">0 €</div></div>
+        <div class="stat"><div class="label">Gastos (rango)</div><div id="stExp" class="value">0 €</div></div>
+      </div>
+
+      <div class="row wrap" style="gap:8px;margin-top:8px">
+        <select id="fRange" onchange="Fin.onRangeChange(this.value)">
+          <option value="30d">Últimos 30 días</option>
+          <option value="90d">Últimos 90 días</option>
+          <option value="ytd">Año en curso (YTD)</option>
+          <option value="all">Todo</option>
+        </select>
+        <div class="grow"></div>
+        <button class="pill ghost" onclick="Fin.exportCSV()">Exportar CSV</button>
+      </div>
+    </section>
+
+    <!-- TABS -->
     <div class="tabs">
       <button class="tab active" data-tab="overview" onclick="Fin.switchTab('overview')">Resumen</button>
-      <button class="tab" data-tab="entries" onclick="Fin.switchTab('entries')">Movimientos</button>
+      <button class="tab" data-tab="entries"  onclick="Fin.switchTab('entries')">Movimientos</button>
       <button class="tab" data-tab="analytics" onclick="Fin.switchTab('analytics')">Analítica</button>
     </div>
 
     <section id="tab-overview" class="view active">
       <div class="sheet">
-        <div class="stats wrap">
-          <div class="stat"><div class="label">Patrimonio</div><div id="stNet" class="value">0 €</div></div>
-          <div class="stat"><div class="label">Ingresos (30d)</div><div id="stInc" class="value">0 €</div></div>
-          <div class="stat"><div class="label">Gastos (30d)</div><div id="stExp" class="value">0 €</div></div>
-          <div class="stat"><div class="label">% Inversión / Salario</div><div id="stInvPct" class="value">0 %</div></div>
-        </div>
         <h3>Evolución patrimonio</h3>
         <canvas id="netWorthChart" height="200"></canvas>
       </div>
@@ -50,12 +79,18 @@
             <option value="gasto">Gasto</option>
             <option value="salario">Salario</option>
             <option value="inversion">Inversión</option>
+            <option value="traspaso">Traspaso</option>
           </select>
           <select id="fCat" onchange="Fin.renderEntries()">
             <option value="">Categoría</option>
             <option>Comida</option><option>Transporte</option><option>Casa</option>
             <option>Ocio</option><option>Salud</option><option>Otros</option>
           </select>
+          <select id="fAcc" onchange="Fin.renderEntries()">
+            <option value="">Cuenta: todas</option>
+          </select>
+          <div class="grow"></div>
+          <button class="pill" onclick="Fin.showAdd()">＋ Movimiento</button>
         </div>
         <div id="entriesList" class="card-column"></div>
       </div>
@@ -65,20 +100,25 @@
       <div class="sheet">
         <h3>Ingresos vs Gastos</h3>
         <canvas id="incExpChart" height="200"></canvas>
-        <h3>Gasto por categoría (últimos 30d)</h3>
+        <h3>Gasto por categoría (rango)</h3>
         <canvas id="catPieChart" height="200"></canvas>
       </div>
     </section>
 
+    <!-- EDITOR DE MOVIMIENTO -->
     <section id="entry-editor" class="view">
       <div class="sheet">
         <h2 id="edTitle">Nuevo movimiento</h2>
+        <label class="field"><span>Cuenta</span>
+          <select id="eAccount"></select>
+        </label>
         <label class="field"><span>Tipo</span>
           <select id="eType">
             <option value="ingreso">Ingreso</option>
             <option value="gasto">Gasto</option>
             <option value="salario">Salario</option>
             <option value="inversion">Inversión</option>
+            <option value="traspaso">Traspaso</option>
           </select>
         </label>
         <label class="field"><span>Categoría</span>
@@ -88,7 +128,12 @@
           </select>
         </label>
         <label class="field"><span>Fecha</span><input id="eDate" type="date"/></label>
-        <label class="field"><span>Importe (€)</span><input id="eAmount" type="number" step="0.01"/></label>
+        <div class="row wrap">
+          <label class="field grow"><span>Importe</span><input id="eAmount" type="number" step="0.01"/></label>
+          <label class="field"><span>Moneda</span>
+            <select id="eCurrency"><option>EUR</option><option>USD</option><option>GBP</option></select>
+          </label>
+        </div>
         <label class="field"><span>Notas</span><input id="eNote" /></label>
         <div class="row">
           <button class="pill ghost" onclick="Fin.closeEditor()">Cancelar</button>
@@ -98,6 +143,57 @@
         </div>
       </div>
     </section>
+
+    <!-- VISTA DETALLE CUENTA (pantalla interna) -->
+    <section id="account-view" class="view">
+      <div class="sheet">
+        <div class="row" style="align-items:center">
+          <button class="icon-btn" onclick="Fin.closeAccountView()">←</button>
+          <h2 id="accTitle" class="grow" style="margin:0">Cuenta</h2>
+          <button class="pill ghost" id="accAddBtn" onclick="Fin.accountPrimaryAction()">＋</button>
+        </div>
+
+        <div class="row" style="align-items:flex-end; gap:10px; margin-top:4px">
+          <div class="big-balance" id="accBalance">0 €</div>
+          <div id="accDelta" class="delta-badge up">▲ 0%</div>
+        </div>
+
+        <canvas id="accChart" height="180" style="margin-top:10px"></canvas>
+
+        <!-- NORMAL: lista de movimientos (lazy) -->
+        <div id="accMovs" class="card-column" style="margin-top:10px"></div>
+        <div class="row" id="accMoreWrap" style="margin-top:8px">
+          <div class="grow"></div>
+          <button class="pill ghost" onclick="Fin.loadMoreAccountMovs()">Cargar más</button>
+        </div>
+
+        <!-- INVERSIONES: contenedor de activos -->
+        <div id="accAssets" class="card-column" style="margin-top:10px; display:none"></div>
+        <div id="accLiquidWrap" class="card" style="display:none">
+          <div class="row">
+            <div class="chip">Líquido</div>
+            <div class="grow"></div>
+            <div class="chip" id="accLiquid">0 €</div>
+            <button class="pill" onclick="Fin.transferFromLiquid()">Traspasar →</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- MODAL GENÉRICO -->
+<div id="modalBackdrop" class="modal-backdrop hidden" onclick="closeModal()"></div>
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-title" id="modalTitle">Título</div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="pill ghost" onclick="closeModal()">Cancelar</button>
+      <div class="grow"></div>
+      <button class="pill" id="modalPrimary">Aceptar</button>
+    </div>
+  </div>
+</div>
+
+
   </main>
 
   <nav class="bottom-nav">
