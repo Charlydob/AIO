@@ -131,4 +131,8 @@ canvas{max-width:100%;height:auto!important;border-radius:12px;border:1px solid 
   content:"";position:absolute;inset:4px;border-radius:50%;
   background:linear-gradient(180deg,#161d2a,#0f141c);border:1px solid #1b2431
 }
-.progress-ring span{position:relative;font-size:12px}
+.progress-ring span {
+  position: relative;
+  font-size: 12px;
+  color: white; /* o el color que quieras */
+}
