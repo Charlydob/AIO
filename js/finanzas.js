@@ -1060,21 +1060,42 @@ async function loadEntries(preferRTDB=true){
   }
 }
 async function loadAccounts(preferRTDB=true){
-  try{
-    let obj=null;
-    if(preferRTDB){
+  // Lee LS primero
+  const lsStore = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}) || {entries:{},accounts:{}};
+  const lsAccs  = lsStore.accounts || {};
+
+  // Lee RTDB
+  let rtdbAccs = null;
+  if(preferRTDB){
+    try{
       const snap = await db.ref(`finance/${UID}/accounts`).once('value');
-      if(snap.exists()) obj = snap.val();
-    }
-    if(!obj){ obj = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}).accounts; }
-    else{
-      const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}); store.accounts=obj; lsSet(LS_KEY_FIN(), store);
-    }
-    ACCOUNTS = obj||{};
-  }catch(e){
-    ACCOUNTS = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}).accounts || {};
+      if(snap.exists()) rtdbAccs = snap.val();
+    }catch(e){ /* ignora, usaremos LS */ }
   }
+  rtdbAccs = rtdbAccs || {};
+
+  // Fusiona (RTDB gana en conflicto de id)
+  const merged = { ...lsAccs, ...rtdbAccs };
+
+  // Espejo a LS
+  const newStore = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}); 
+  newStore.accounts = merged; 
+  lsSet(LS_KEY_FIN(), newStore);
+
+  // Sube a RTDB los que solo existían en LS
+  if(preferRTDB){
+    const toPush = {};
+    for(const id in merged){
+      if(!(id in rtdbAccs)) toPush[id] = merged[id];
+    }
+    if(Object.keys(toPush).length){
+      try{ await db.ref(`finance/${UID}/accounts`).update(toPush); }catch(e){}
+    }
+  }
+
+  ACCOUNTS = merged;
 }
+
 async function loadAssetsSummary(preferRTDB=true){
   try{
     let obj=null;
