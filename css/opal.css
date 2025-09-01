@@ -254,3 +254,38 @@ select, .field select{
 .account-actions{ display:flex; gap:8px; margin-top:8px; }
 .pill.sm{ padding:8px 12px; font-size:12px; }
 /* ===================================================================== */
+/* === Finanzas › Account Card (COMPACTO) =============================== */
+.account-grid{ gap:8px; }
+
+.account-card{
+  padding:10px;                 /* ↓ antes 12px */
+  border-radius:10px;           /* ↓ */
+}
+.account-head{ gap:6px; }
+.account-swatch{ width:10px; height:10px; } /* puntito más pequeño */
+
+.account-name{ font-weight:700; font-size:14px; }   /* ↓ */
+.account-meta{ margin-left:auto; text-align:right; line-height:1.05; }
+.account-meta .account-type{ font-size:11px; opacity:.9; } /* "Normal" */
+.account-meta .account-ccy{   font-size:8px;  color:var(--muted); margin-top:1px; } /* EUR pequeñito */
+.account-meta .account-delta{ font-size:10px; padding:1px 6px; margin-top:3px; border-radius:999px; display:inline-block; }
+.account-meta .account-delta.up{   background:#1b3325; border:1px solid #2a6746; color:#9de7c6; }
+.account-meta .account-delta.down{ background:#3a1e24; border:1px solid #7a3a44; color:#ffc1c8; }
+
+.account-balance{ font-size:16px; font-weight:700; margin-top:6px; } /* ↓ */
+
+.account-actions{ display:flex; gap:6px; margin-top:8px; }
+.pill.sm{ padding:6px 12px; font-size:12px; }      /* botones pequeños dentro de la tarjeta */
+.account-card .pill{ box-shadow:0 3px 10px rgba(58,134,255,.22); } /* sombra más sutil */
+
+/* Chips dentro de la tarjeta (no afecta al resto) */
+.account-card .chip{ padding:4px 8px; font-size:11px; }
+
+/* En dispositivos muy estrechos, ajuste extra */
+@media (max-width:360px){
+  .account-name{ font-size:13px; }
+  .account-balance{ font-size:15px; }
+  .account-meta .account-type{ font-size:10px; }
+  .account-meta .account-delta{ font-size:9px; padding:1px 5px; }
+}
+/* ===================================================================== */
