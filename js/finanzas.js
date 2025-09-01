@@ -38,6 +38,7 @@ function matchesQuery(e, q){
     e.category || '',
     e.note || '',
     accountName(e.accountId) || '',
+    accountName(e.destAccountId) || '',
     String(e.amount||'')
   ].join(' ').toLowerCase();
   return q.split(/\s+/).every(tok => hay.includes(tok));
@@ -50,42 +51,51 @@ function computeDailyBalanceForAccount(acc, dayKey){
   if(acc.type==='normal'){
     let bal = acc.initBalance || 0;
     Object.values(ENTRIES).forEach(e=>{
-      if(e.accountId!==acc.id) return;
-      if(e.date<=dayKey){
-        const v = fx(e.amount, e.currency||'EUR', accCcy);
-        if(e.type==='gasto') bal -= v;
-        else bal += v;
+      if(e.date>dayKey) return;
+      const vAcc = fx(e.amount||0, e.currency||'EUR', accCcy);
+      if(e.type==='gasto' && e.accountId===acc.id) bal -= vAcc;
+      if(['ingreso','salario','inversion'].includes(e.type) && e.accountId===acc.id) bal += vAcc;
+      // traspaso entre cuentas
+      if(e.type==='traspaso'){
+        if(e.accountId===acc.id) bal -= vAcc;               // sale de origen
+        if(e.destAccountId===acc.id) bal += vAcc;           // entra a destino
       }
     });
     return +bal.toFixed(2);
   }
 
-  // inversión: líquido y “invertido” reconstruidos desde traspasos
-  const liquidInit = (acc.liquidInit!=null)? acc.liquidInit : (acc.liquid||0); // compat
-  let liquid = liquidInit;    // en moneda de la cuenta
-  let investedAcc = 0;        // invertido convertido a moneda de la cuenta
+  // inversión
+  const liquidInit = (acc.liquidInit!=null)? acc.liquidInit : (acc.liquid||0);
+  let liquid = liquidInit;
+  let investedAcc = 0;
 
   Object.values(ENTRIES).forEach(e=>{
-    if(e.accountId!==acc.id) return;
-    if(e.date<=dayKey && e.type==='traspaso'){
+    if(e.date>dayKey) return;
+    const amtAcc = fx(e.amount||0, e.currency||accCcy, accCcy);
+
+    if(e.type==='traspaso'){
       const isToAsset   = /A activo/i.test(e.note||'');
       const isFromAsset = /Desde activo/i.test(e.note||'');
-      const fee = (()=>{ const m = (e.note||'').match(/fee\s+([\d.]+)/i); return m? parseFloat(m[1]||'0')||0 : 0; })();
-      const amtAcc = fx(e.amount||0, e.currency||accCcy, accCcy);
+      const fee = (()=>{ const m=(e.note||'').match(/fee\s+([\d.]+)/i); return m?parseFloat(m[1]||'0')||0:0; })();
       const feeAcc = fx(fee, e.currency||accCcy, accCcy);
-      if(isToAsset){        // líquido disminuye; invertido aumenta neto
-        liquid      -= amtAcc;
-        investedAcc += (amtAcc - feeAcc);
-      }else if(isFromAsset){// líquido aumenta; invertido baja
-        liquid      += amtAcc;
-        investedAcc -= amtAcc;
+
+      if(isToAsset && e.accountId===acc.id){ liquid -= amtAcc; investedAcc += (amtAcc - feeAcc); return; }
+      if(isFromAsset && e.accountId===acc.id){ liquid += amtAcc; investedAcc -= amtAcc; return; }
+
+      // traspaso entre cuentas (afecta a líquido)
+      if(e.accountId===acc.id){ liquid -= amtAcc; }
+      if(e.destAccountId===acc.id){ liquid += amtAcc; }
+    }else{
+      // ingresos/gastos aplicados al líquido
+      if(e.accountId===acc.id){
+        if(e.type==='gasto') liquid -= amtAcc;
+        if(['ingreso','salario','inversion'].includes(e.type)) liquid += amtAcc;
       }
     }
   });
 
   return +(liquid + investedAcc).toFixed(2);
 }
-
 // Recalcula y sube balances diarios de los últimos N días (ligero)
 async function recomputeDailyRange(accountId, daysBack=90){
   const acc = ACCOUNTS[accountId]; if(!acc) return;
@@ -102,12 +112,18 @@ async function recomputeDailyRange(accountId, daysBack=90){
 }
 
 // --- Modal helpers ---
-function openModal({title, bodyHTML, submitText='Aceptar', onSubmit}){
+function openModal({title, bodyHTML, submitText='Aceptar', onSubmit, onOpen}){
   document.getElementById('modalTitle').textContent = title;
-  document.getElementById('modalBody').innerHTML = bodyHTML;
+  const body = document.getElementById('modalBody');
+  body.innerHTML = bodyHTML;
+
   const btn = document.getElementById('modalPrimary');
   btn.textContent = submitText;
   btn.onclick = async ()=>{ if(onSubmit) await onSubmit(); };
+
+  // asegura que los elementos existen antes de enlazar eventos
+  requestAnimationFrame(()=>{ if(typeof onOpen==='function') onOpen(); });
+
   document.getElementById('modal').classList.remove('hidden');
   document.getElementById('modalBackdrop').classList.remove('hidden');
 }
@@ -310,25 +326,35 @@ const Fin = {
   },
 
   // ---------- Movimientos ----------
-  showAdd(forceAccountId){
-    EDIT_ID = null; EDIT_OBJ = null;
-    document.getElementById('edTitle').textContent='Nuevo movimiento';
-    fillAccountsSelect('eAccount', forceAccountId);
-    setVal('eType','gasto'); setVal('eCat','Otros'); setVal('eDate', new Date().toISOString().slice(0,10));
-    setVal('eAmount',''); setVal('eCurrency','EUR'); setVal('eNote','');
-    document.getElementById('eDelete').classList.add('hidden');
-    openEditor();
-  },
+showAdd(forceAccountId){
+  EDIT_ID = null;
+  document.getElementById('edTitle').textContent = 'Nuevo movimiento';
+  fillAccountsSelect('eAccount', forceAccountId);
+  setVal('eType','gasto');
+  setVal('eCat','Otros');
+  setVal('eDate', new Date().toISOString().slice(0,10));
+  setVal('eAmount','');
+  setVal('eCurrency','EUR');
+  setVal('eNote','');
+  document.getElementById('eDelete').classList.add('hidden');
+  openEditor();
+  setupEntryEditorUI(); // muestra/oculta destino si es traspaso
+},
 
-  openEdit(id, obj){
-    EDIT_ID = id; EDIT_OBJ = obj;
-    document.getElementById('edTitle').textContent='Editar movimiento';
-    fillAccountsSelect('eAccount', obj.accountId);
-    setVal('eType', obj.type); setVal('eCat', obj.category||'Otros'); setVal('eDate', obj.date);
-    setVal('eAmount', obj.amount); setVal('eCurrency', obj.currency||'EUR'); setVal('eNote', obj.note||'');
-    document.getElementById('eDelete').classList.remove('hidden');
-    openEditor();
-  },
+openEdit(id, obj){
+  EDIT_ID = id;
+  document.getElementById('edTitle').textContent = 'Editar movimiento';
+  fillAccountsSelect('eAccount', obj.accountId);
+  setVal('eType', obj.type);
+  setVal('eCat', obj.category || 'Otros');
+  setVal('eDate', obj.date);
+  setVal('eAmount', obj.amount);
+  setVal('eCurrency', obj.currency || 'EUR');
+  setVal('eNote', obj.note || '');
+  document.getElementById('eDelete').classList.remove('hidden');
+  openEditor();
+  setupEntryEditorUI(obj.destAccountId || ''); // preselecciona destino si existe
+},
 
   closeEditor(){ closeEditor(); },
 
@@ -565,26 +591,89 @@ function sumNetWorthFromAccounts(){
   });
   return total;
 }
+// 4) Editor: guardar traspaso con cuenta destino
+Fin.saveEntry = async function(){
+  try{
+    const amount = parseFloat(val('eAmount')||'0'); if(isNaN(amount)) return alert('Importe inválido');
+    const type = val('eType');
+    const entry = {
+      accountId: val('eAccount'),
+      type,
+      category: val('eCat'),
+      date: val('eDate') || new Date().toISOString().slice(0,10),
+      amount, currency: val('eCurrency')||'EUR',
+      note: val('eNote')||'',
+      ts: Date.now()
+    };
+    if(!entry.accountId) return alert('Selecciona cuenta origen');
 
+    // destino para traspaso
+    if(type==='traspaso'){
+      entry.destAccountId = document.getElementById('eDestAccount').value || '';
+      if(!entry.destAccountId) return alert('Selecciona cuenta destino');
+      if(entry.destAccountId === entry.accountId) return alert('Origen y destino no pueden ser la misma cuenta');
+    }else{
+      delete entry.destAccountId;
+    }
+
+    const base = `finance/${UID}`;
+    const eid = EDIT_ID || id();
+    if(EDIT_ID){ await db.ref(`${base}/entries/${eid}`).update(entry); }
+    else{ await db.ref(`${base}/entries/${eid}`).set({...entry,id:eid}); }
+    mirrorEntryLS({...entry,id:eid});
+
+    closeEditor();
+    await loadEntries(true);
+    await loadAssetsSummary(true);
+    // recomputa las cuentas implicadas
+    await recomputeDailyRange(entry.accountId, 60);
+    if(entry.destAccountId) await recomputeDailyRange(entry.destAccountId, 60);
+    await loadAccounts(true);
+    Fin.refreshAll();
+    if(ACC_CURRENT && (ACC_CURRENT.id===entry.accountId || ACC_CURRENT.id===entry.destAccountId)) await Fin.openAccount(ACC_CURRENT.id, true);
+  }catch(e){
+    console.error("save entry", e);
+    alert("⚠️ Falló RTDB. Intenta de nuevo.");
+  }
+};
 function computeAccountBalances(acc){
-  // balance en MONEDA DE VISUALIZACIÓN (DISPLAY_CCY)
   const accCcy = acc.currency || 'EUR';
 
   if(acc.type==='normal'){
     let bal = acc.initBalance||0;
     Object.values(ENTRIES).forEach(e=>{
-      if(e.accountId!==acc.id) return;
       const v = fx(e.amount, e.currency||'EUR', accCcy);
-      if(e.type==='gasto') bal -= v;
-      if(['ingreso','salario','inversion'].includes(e.type)) bal += v;
+      if(e.accountId===acc.id){
+        if(e.type==='gasto') bal -= v;
+        if(['ingreso','salario','inversion'].includes(e.type)) bal += v;
+        if(e.type==='traspaso') bal -= v; // sale
+      }
+      if(e.destAccountId===acc.id && e.type==='traspaso'){
+        bal += v; // entra
+      }
     });
     return { balanceNow: fx(bal, accCcy, DISPLAY_CCY), liquidNow: undefined };
   }
 
-  // inversión: balance = líquido + suma invertida (sin valoración de mercado)
-  const liquid = acc.liquid || 0;                         // en moneda de la cuenta
-  const investedSum = ASSET_SUMS[acc.id] || 0;            // ya en moneda de la cuenta
-  const balInv = liquid + investedSum;                    // en moneda de la cuenta
+  // inversión: líquido + invertido (sin valoración)
+  let liquid = acc.liquid || 0;
+  Object.values(ENTRIES).forEach(e=>{
+    const v = fx(e.amount, e.currency||accCcy, accCcy);
+    if(e.type==='traspaso'){
+      const isToAsset=/A activo/i.test(e.note||''); const isFromAsset=/Desde activo/i.test(e.note||'');
+      if(e.accountId===acc.id && isToAsset) liquid -= v;
+      else if(e.accountId===acc.id && isFromAsset) liquid += v;
+      // cuenta↔cuenta
+      else if(e.accountId===acc.id) liquid -= v;
+      else if(e.destAccountId===acc.id) liquid += v;
+    }else if(e.accountId===acc.id){
+      if(e.type==='gasto') liquid -= v;
+      if(['ingreso','salario','inversion'].includes(e.type)) liquid += v;
+    }
+  });
+
+  const investedSum = ASSET_SUMS[acc.id] || 0;
+  const balInv = liquid + investedSum;
   return { balanceNow: fx(balInv, accCcy, DISPLAY_CCY), liquidNow: liquid };
 }
 
@@ -661,6 +750,7 @@ async function drawAccountChart(accId, accCcy){
 }
 
 // ---------- Net / Analytics ----------
+// === 1) Patrimonio correcto (suma de cuentas por día) ===
 function drawNetWorth(){
   const ctx = document.getElementById('netWorthChart').getContext('2d');
   if(charts.net) charts.net.destroy();
@@ -846,17 +936,14 @@ Fin.showAddAccount = async function(){
       <div id="acc_block_inv" class="hidden">
         <label class="field"><span>Líquido inicial</span><input id="acc_liq" type="number" step="0.01" value="0"/></label>
       </div>
-      <script>
-        (function(){
-          const sel = document.getElementById('acc_type');
-          function toggle(){ const inv = sel.value==='inversion';
-            document.getElementById('acc_block_normal').classList.toggle('hidden', inv);
-            document.getElementById('acc_block_inv').classList.toggle('hidden', !inv);
-          }
-          sel.addEventListener('change', toggle); toggle();
-        })();
-      </script>
     `,
+    onOpen: ()=>{
+      const sel = document.getElementById('acc_type');
+      const normal = document.getElementById('acc_block_normal');
+      const inv = document.getElementById('acc_block_inv');
+      function toggle(){ const isInv = sel.value==='inversion'; normal.classList.toggle('hidden', isInv); inv.classList.toggle('hidden', !isInv); }
+      sel.addEventListener('change', toggle); toggle();
+    },
     onSubmit: async ()=>{
       const name = document.getElementById('acc_name').value.trim(); if(!name) return alert('Nombre requerido');
       const type = document.getElementById('acc_type').value;
@@ -1048,7 +1135,7 @@ Fin.quickAddMovement = function(){
     title:'Nuevo movimiento',
     submitText:'Guardar',
     bodyHTML: `
-      <label class="field"><span>Cuenta</span>
+      <label class="field"><span>Cuenta (origen)</span>
         <select id="qm_acc">${accOpts}</select>
       </label>
       <div class="row wrap">
@@ -1068,6 +1155,13 @@ Fin.quickAddMovement = function(){
           </select>
         </label>
       </div>
+
+      <div id="qm_dest_wrap" class="hidden">
+        <label class="field"><span>Cuenta destino</span>
+          <select id="qm_dest">${accOpts}</select>
+        </label>
+      </div>
+
       <label class="field"><span>Fecha</span><input id="qm_date" type="date" value="${new Date().toISOString().slice(0,10)}"/></label>
       <div class="row wrap">
         <label class="field grow"><span>Importe</span><input id="qm_amount" type="number" step="0.01"/></label>
@@ -1076,19 +1170,37 @@ Fin.quickAddMovement = function(){
         </label>
       </div>
       <label class="field"><span>Notas</span><input id="qm_note"/></label>
-      <script>
-        (function(){
-          const sel = document.getElementById('qm_acc');
-          const ccy = document.getElementById('qm_ccy');
-          function sync(){ const opt = sel.options[sel.selectedIndex]; ccy.value = opt?.dataset?.ccy || 'EUR'; }
-          sel.addEventListener('change', sync); sync();
-        })();
-      </script>
     `,
+    onOpen: ()=>{
+      const acc = document.getElementById('qm_acc');
+      const ccy = document.getElementById('qm_ccy');
+      const typ = document.getElementById('qm_type');
+      const wrap= document.getElementById('qm_dest_wrap');
+      const dst = document.getElementById('qm_dest');
+
+      function syncCcy(){
+        const opt = acc.options[acc.selectedIndex];
+        ccy.value = opt?.dataset?.ccy || 'EUR';
+      }
+      function toggleDest(){
+        const isTransfer = typ.value==='traspaso';
+        wrap.classList.toggle('hidden', !isTransfer);
+        // evitar misma cuenta en destino
+        if(isTransfer){
+          const origin = acc.value;
+          [...dst.options].forEach(o=>o.disabled = (o.value===origin));
+          if(dst.value===origin) dst.value = ([...dst.options].find(o=>!o.disabled)?.value)||'';
+        }
+      }
+      acc.addEventListener('change', ()=>{ syncCcy(); toggleDest(); });
+      typ.addEventListener('change', toggleDest);
+      syncCcy(); toggleDest();
+    },
     onSubmit: async ()=>{
+      const type = document.getElementById('qm_type').value;
       const entry = {
         accountId: document.getElementById('qm_acc').value,
-        type: document.getElementById('qm_type').value,
+        type,
         category: document.getElementById('qm_cat').value,
         date: document.getElementById('qm_date').value,
         amount: parseFloat(document.getElementById('qm_amount').value||'0')||0,
@@ -1096,7 +1208,13 @@ Fin.quickAddMovement = function(){
         note: document.getElementById('qm_note').value||'',
         ts: Date.now()
       };
-      if(!entry.accountId) return alert('Selecciona una cuenta');
+      if(!entry.accountId) return alert('Selecciona cuenta origen');
+
+      if(type==='traspaso'){
+        entry.destAccountId = document.getElementById('qm_dest').value || '';
+        if(!entry.destAccountId) return alert('Selecciona cuenta destino');
+        if(entry.destAccountId === entry.accountId) return alert('Origen y destino no pueden coincidir');
+      }
 
       const base = `finance/${UID}`; const eid = id();
       try{ await db.ref(`${base}/entries/${eid}`).set({...entry,id:eid}); }catch(e){}
@@ -1104,10 +1222,112 @@ Fin.quickAddMovement = function(){
 
       closeModal();
       await loadEntries(true);
-      await loadAssetsSummary(true); // por si afecta a cuenta inversión vía traspasos
+      await loadAssetsSummary(true);
       await recomputeDailyRange(entry.accountId, 60);
+      if(entry.destAccountId) await recomputeDailyRange(entry.destAccountId, 60);
+      await loadAccounts(true);
       Fin.refreshAll();
-      if(ACC_CURRENT && ACC_CURRENT.id===entry.accountId) await Fin.openAccount(entry.accountId, true);
+      if(ACC_CURRENT && (ACC_CURRENT.id===entry.accountId || ACC_CURRENT.id===entry.destAccountId)) await Fin.openAccount(ACC_CURRENT.id, true);
     }
   });
 };
+
+// 5) Render de movimientos: muestra “→ Cuenta destino” cuando aplique
+Fin.renderEntries = function(){
+  const type = val('fType');
+  const cat  = val('fCat');
+  const accF = val('fAcc');
+  const q    = (document.getElementById('fSearch')?.value||'').trim().toLowerCase();
+  const wrap = document.getElementById('entriesList');
+  wrap.innerHTML='';
+
+  const [from,to] = rangeDates();
+  const list = Object.values(ENTRIES)
+    .filter(e=>{
+      const d=new Date(e.date);
+      return d>=from && d<=to && (!type||e.type===type) && (!cat||e.category===cat) && (!accF||e.accountId===accF) && matchesQuery(e,q);
+    })
+    .sort((a,b)=>b.date.localeCompare(a.date) || b.ts-a.ts);
+
+  if(list.length===0){
+    const empty=document.createElement('div'); empty.className='card compact';
+    empty.innerHTML='<div class="muted">Sin movimientos. Pulsa ＋ Movimiento.</div>';
+    wrap.appendChild(empty); return;
+  }
+
+  const groups = {};
+  list.forEach(e=>{
+    const ym = e.date.slice(0,7);
+    (groups[ym] = groups[ym] || {items:[], inc:0, exp:0}).items.push(e);
+    const v = fx(e.amount, e.currency||'EUR', DISPLAY_CCY);
+    if(e.type==='gasto') groups[ym].exp += v;
+    if(['ingreso','salario','inversion'].includes(e.type)) groups[ym].inc += v;
+  });
+
+  Object.keys(groups).sort().reverse().forEach(ym=>{
+    const g = groups[ym];
+    const header=document.createElement('div'); header.className='card compact';
+    const monthLabel = monthHuman(ym);
+    const net = g.inc - g.exp;
+    header.innerHTML = `
+      <div class="row">
+        <div class="chip">${monthLabel}</div>
+        <div class="grow"></div>
+        <div class="chip info">Ingresos: ${euroLike(g.inc)}</div>
+        <div class="chip warn">Gastos: ${euroLike(g.exp)}</div>
+        <div class="chip ${net>=0?'ok':'bad'}">Saldo: ${euroLike(net)}</div>
+      </div>
+    `;
+    wrap.appendChild(header);
+
+    g.items.forEach(e=>{
+      const card=document.createElement('div'); card.className='card compact';
+      const dest = e.destAccountId ? `<div class="chip arrow">→ ${accountName(e.destAccountId)}</div>` : '';
+      card.innerHTML = `
+        <div class="row tight">
+          <div class="chip date">${e.date}</div>
+          <div class="chip">${ accountName(e.accountId) }</div>
+          <div class="chip">${e.type}</div>
+          ${e.category?`<div class="chip">${e.category}</div>`:''}
+          ${dest}
+          <div class="grow"></div>
+          <div class="chip amt ${e.type==='gasto'?'neg':'pos'}">
+            ${euroLike(fx(e.amount, e.currency||'EUR', DISPLAY_CCY))}
+          </div>
+        </div>
+        ${e.note?`<p class="muted small">${e.note}</p>`:''}
+        <div class="row"><button class="pill xs" onclick='Fin.openEdit("${e.id}", ${JSON.stringify(e).replace(/"/g,'&quot;')})'>Editar</button></div>
+      `;
+      wrap.appendChild(card);
+    });
+  });
+};
+
+
+function setupEntryEditorUI(prefDestId){
+  const typeSel   = document.getElementById('eType');
+  const originSel = document.getElementById('eAccount');
+  const destWrap  = document.getElementById('eDestWrap');
+  const destSel   = document.getElementById('eDestAccount');
+
+  function refillDest(){
+    fillAccountsSelect('eDestAccount');
+    // quita placeholder
+    const opt0 = destSel.querySelector('option[value=""]'); if(opt0) opt0.remove();
+    // deshabilita misma cuenta que origen
+    [...destSel.options].forEach(o => o.disabled = (o.value === originSel.value));
+    if(prefDestId){ destSel.value = prefDestId; }
+    if(destSel.value === originSel.value){
+      const first = [...destSel.options].find(o=>!o.disabled);
+      destSel.value = first ? first.value : '';
+    }
+  }
+  function toggle(){
+    const isTransfer = typeSel.value === 'traspaso';
+    destWrap.classList.toggle('hidden', !isTransfer);
+    if(isTransfer) refillDest();
+  }
+  originSel.addEventListener('change', toggle);
+  typeSel.addEventListener('change', toggle);
+  toggle();
+}

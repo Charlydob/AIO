@@ -258,3 +258,39 @@ select#displayCurrency{ background:#101826; color:#d9e2f1; border:1px solid #1a2
   box-shadow:0 8px 24px rgba(58,134,255,.30);
 }
 .fab:active{ transform:scale(.98); }
+/* Selects coherentes con la app */
+select, .field select {
+  appearance:none;
+  background:linear-gradient(180deg,#0f141d,#0b1119);
+  border:1px solid #1b2431;
+  color:var(--text);
+  padding:10px 12px;
+  border-radius:12px;
+}
+
+/* Lista de movimientos más compacta */
+.compact-list .card,
+.card.compact{
+  padding:10px;
+  border-radius:12px;
+}
+.compact-list .card .row.tight{
+  gap:6px;
+}
+.compact-list .chip,
+.card.compact .chip{
+  padding:4px 8px;
+  font-size:12px;
+}
+
+/* Variantes útiles en chips */
+.chip.info{ background:#3a86ff22; border-color:#3a86ff44; }
+.chip.warn{ background:#e2555522; border-color:#e2555544; }
+.chip.ok{ background:#21c28a22; border-color:#21c28a44; }
+.chip.bad{ background:#e2555522; border-color:#e2555544; }
+.chip.amt.neg{ color:#ff9fa6; }
+.chip.amt.pos{ color:#9ee6c9; }
+.muted.small{ font-size:12px; opacity:.9; }
+
+/* Botón pequeño para filas de ítem */
+.pill.xs{ padding:6px 10px; font-size:12px; }
