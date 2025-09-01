@@ -16,7 +16,7 @@ let DISPLAY_CCY = 'EUR';
 let ACC_CURRENT = null;       // cuenta abierta en vista interna
 let ACC_MOV_OLDEST_TS = null; // paginación lazy
 let ACC_SEARCH_Q = '';        // búsqueda en lista de movimientos de cuenta
-let ASSET_SUMS = {};          // { [accountId]: sumaInvertidaEnMonedaDeLaCuenta }
+let ASSET_SUMS = {};          // { [accountId]: sumaValoradaEnMonedaDeLaCuenta }
 
 const LS_KEY_FIN = ()=>`finance_${UID}`;
 const FX = { // tasas simple editables
@@ -537,17 +537,196 @@ const Fin = {
     }
 
     arr.forEach(a=>{
+      const shownValue = (a.value!=null ? a.value : (a.invested||0));
+      const chipVal = euroLike(fx(shownValue, a.currency||ACC_CURRENT.currency, DISPLAY_CCY), DISPLAY_CCY);
+      const chipAlt = (a.value!=null && a.invested!=null && a.value!==a.invested)
+        ? ` · inv: ${euroLike(fx(a.invested, a.currency||ACC_CURRENT.currency, DISPLAY_CCY), DISPLAY_CCY)}`
+        : '';
       const card=document.createElement('div'); card.className='card';
       card.innerHTML = `
         <div class="row">
           <div class="chip">${a.name}</div>
           <div class="chip">${a.type||'activo'}</div>
           <div class="grow"></div>
-          <div class="chip">${euroLike(fx(a.invested||0, a.currency||ACC_CURRENT.currency, DISPLAY_CCY), DISPLAY_CCY)}</div>
+          <div class="chip">${chipVal}${chipAlt}</div>
           <button class="pill ghost" onclick="Fin.openAsset('${a.id}')">Abrir</button>
         </div>
       `;
       wrap.appendChild(card);
+    });
+  },
+
+  // Modal: crear activo
+  addAsset(){
+    if(!ACC_CURRENT || ACC_CURRENT.type!=='inversion') return;
+    const acc = ACC_CURRENT;
+    openModal({
+      title:'Nuevo activo',
+      submitText:'Crear',
+      bodyHTML: `
+        <label class="field"><span>Nombre</span><input id="as_name" placeholder="Vanguard World"/></label>
+        <div class="row wrap">
+          <label class="field grow"><span>Tipo</span>
+            <select id="as_type">
+              <option value="fondo">Fondo</option>
+              <option value="empresa">Empresa</option>
+              <option value="cripto">Cripto</option>
+            </select>
+          </label>
+          <label class="field"><span>Moneda</span>
+            <select id="as_ccy"><option>EUR</option><option>USD</option><option>GBP</option></select>
+          </label>
+        </div>
+        <label class="field"><span>Valor actual</span><input id="as_value" type="number" step="0.01" placeholder="0"/></label>
+      `,
+      onOpen: ()=>{
+        document.getElementById('as_ccy').value = acc.currency || 'EUR';
+      },
+      onSubmit: async ()=>{
+        const name = (document.getElementById('as_name').value||'').trim();
+        if(!name) return alert('Nombre requerido');
+        const type = document.getElementById('as_type').value;
+        const currency = document.getElementById('as_ccy').value;
+        const value = parseFloat(document.getElementById('as_value').value||'0')||0;
+        const assetId = id();
+        const base = `finance/${UID}/assets/${acc.id}/${assetId}`;
+        const asset = { id:assetId, name, type, currency, invested:0, value:value };
+        try{
+          await db.ref(base).set(asset);
+          const day = ymd();
+          await db.ref(`${base}/history/${day}`).set({ value, currency, ts:Date.now() });
+        }catch(e){}
+        closeModal();
+        await loadAssetsSummary(true);
+        await recomputeDailyRange(acc.id, 7);
+        await Fin.renderAssets();
+        await Fin.refreshAccountHeader();
+      }
+    });
+  },
+
+  // Modal: abrir/editar activo + traspasos
+  openAsset(assetId){
+    if(!ACC_CURRENT) return;
+    const accId = ACC_CURRENT.id;
+    db.ref(`finance/${UID}/assets/${accId}/${assetId}`).once('value').then(s=>{
+      if(!s.exists()) return;
+      const a = s.val();
+      openModal({
+        title: `Activo • ${a.name}`,
+        submitText:'Guardar',
+        bodyHTML: `
+          <label class="field"><span>Nombre</span><input id="ea_name" value="${(a.name||'').replace(/"/g,'&quot;')}"/></label>
+          <div class="row wrap">
+            <label class="field grow"><span>Tipo</span>
+              <select id="ea_type">
+                <option ${a.type==='fondo'?'selected':''} value="fondo">Fondo</option>
+                <option ${a.type==='empresa'?'selected':''} value="empresa">Empresa</option>
+                <option ${a.type==='cripto'?'selected':''} value="cripto">Cripto</option>
+              </select>
+            </label>
+            <label class="field"><span>Moneda</span>
+              <select id="ea_ccy"><option ${a.currency==='EUR'?'selected':''}>EUR</option><option ${a.currency==='USD'?'selected':''}>USD</option><option ${a.currency==='GBP'?'selected':''}>GBP</option></select>
+            </label>
+          </div>
+          <div class="row wrap">
+            <label class="field grow"><span>Valor actual</span><input id="ea_value" type="number" step="0.01" value="${a.value||0}"/></label>
+            <label class="field"><span>Invertido</span><input id="ea_invested" type="number" step="0.01" value="${a.invested||0}" disabled/></label>
+          </div>
+          <div class="row" style="gap:8px;margin-top:8px">
+            <button class="pill ghost" id="ea_toAsset">Traspasar desde líquido →</button>
+            <button class="pill ghost" id="ea_toCash">← A líquido</button>
+          </div>
+        `,
+        onOpen: ()=>{
+          document.getElementById('ea_toAsset').onclick = ()=> Fin.transferFromLiquid(assetId);
+          document.getElementById('ea_toCash').onclick = ()=>{
+            openModal({
+              title:'A líquido',
+              submitText:'Traspasar',
+              bodyHTML: `
+                <label class="field"><span>Importe</span><input id="t_amount" type="number" step="0.01"/></label>
+                <label class="field"><span>Moneda</span>
+                  <select id="t_ccy"><option>EUR</option><option>USD</option><option>GBP</option></select>
+                </label>
+              `,
+              onOpen: ()=>{ document.getElementById('t_ccy').value = a.currency||'EUR'; },
+              onSubmit: async ()=>{
+                const amount = parseFloat(document.getElementById('t_amount').value||'0')||0;
+                const ccy = document.getElementById('t_ccy').value;
+                if(amount<=0) return alert('Importe > 0');
+                await Fin._toLiquid(accId, amount, ccy, assetId);
+                closeModal();
+                await loadAssetsSummary(true);
+                await recomputeDailyRange(accId, 7);
+                await Fin.renderAssets();
+                await Fin.refreshAccountHeader();
+              }
+            });
+          };
+        },
+        onSubmit: async ()=>{
+          const name = (document.getElementById('ea_name').value||'').trim() || a.name;
+          const type = document.getElementById('ea_type').value || a.type;
+          const currency = document.getElementById('ea_ccy').value || a.currency;
+          const value = parseFloat(document.getElementById('ea_value').value||'0')||0;
+          try{
+            const base = `finance/${UID}/assets/${accId}/${assetId}`;
+            await db.ref(base).update({ name, type, currency, value });
+            const day = ymd();
+            await db.ref(`${base}/history/${day}`).set({ value, currency, ts:Date.now() });
+          }catch(e){}
+          closeModal();
+          await loadAssetsSummary(true);
+          await recomputeDailyRange(accId, 7);
+          Fin.refreshAccountHeader();
+          Fin.renderAssets();
+        }
+      });
+    });
+  },
+
+  transferFromLiquid(assetId=null){
+    if(!ACC_CURRENT || ACC_CURRENT.type!=='inversion') return;
+    const acc = ACC_CURRENT;
+    openModal({
+      title:'A activo desde líquido',
+      submitText:'Traspasar',
+      bodyHTML: `
+        <label class="field"><span>Activo</span><select id="ta_asset"></select></label>
+        <div class="row wrap">
+          <label class="field grow"><span>Importe</span><input id="ta_amount" type="number" step="0.01"/></label>
+          <label class="field"><span>Moneda</span>
+            <select id="ta_ccy"><option>EUR</option><option>USD</option><option>GBP</option></select>
+          </label>
+        </div>
+        <label class="field"><span>Fee (opcional)</span><input id="ta_fee" type="number" step="0.01" value="0"/></label>
+      `,
+      onOpen: async ()=>{
+        // Cargar activos en selector
+        const sel = document.getElementById('ta_asset');
+        sel.innerHTML='';
+        let assets={}; try{ const s=await db.ref(`finance/${UID}/assets/${acc.id}`).once('value'); assets=s.val()||{}; }catch(e){}
+        Object.values(assets).forEach(x=>{
+          const o=document.createElement('option'); o.value=x.id; o.textContent=`${x.name} (${x.type||'activo'})`; sel.appendChild(o);
+        });
+        if(assetId) sel.value = assetId;
+        document.getElementById('ta_ccy').value = acc.currency||'EUR';
+      },
+      onSubmit: async ()=>{
+        const aid = document.getElementById('ta_asset').value;
+        if(!aid) return alert('Selecciona activo');
+        const amount = parseFloat(document.getElementById('ta_amount').value||'0')||0;
+        const ccy = document.getElementById('ta_ccy').value;
+        const fee = parseFloat(document.getElementById('ta_fee').value||'0')||0;
+        if(amount<=0) return alert('Importe > 0');
+        await Fin._fromLiquid(acc.id, amount, ccy, aid, fee);
+        closeModal();
+        await loadAssetsSummary(true);
+        await recomputeDailyRange(acc.id, 7);
+        await Fin.renderAssets();
+        await Fin.refreshAccountHeader();
+      }
     });
   },
 
@@ -686,12 +865,12 @@ const Fin = {
 
   async refreshAll(){
     renderAccounts();
-  fillAccountsSelect('eAccount');
-  populateFilterAccounts();
-  populateAnalyticsAccounts();   // ← NUEVO
-  updateStats();
-  drawNetWorth();
-  drawAnalytics();
+    fillAccountsSelect('eAccount');
+    populateFilterAccounts();
+    populateAnalyticsAccounts();
+    updateStats();
+    drawNetWorth();
+    drawAnalytics();
   },
 
   // Reset + búsqueda en vista de cuenta
@@ -785,7 +964,7 @@ function computeAccountBalances(acc){
     return { balanceNow: fx(bal, accCcy, DISPLAY_CCY), liquidNow: undefined };
   }
 
-  // inversión: líquido + invertido (sin valoración)
+  // inversión: líquido + valor de activos (value si existe; si no, invested)
   let liquid = acc.liquid || 0;
   Object.values(ENTRIES).forEach(e=>{
     const v = fx(e.amount, e.currency||accCcy, accCcy);
@@ -825,7 +1004,10 @@ async function computeDeltaVsPrevMonth(acc, balanceNow){
       const s=await db.ref(`finance/${UID}/assets/${acc.id}`).once('value');
       const assets=s.val()||{};
       let inv=0;
-      Object.values(assets).forEach(a=>{ inv += fx(a.invested||0, a.currency||acc.currency, acc.currency); });
+      Object.values(assets).forEach(a=>{
+        const base = (a.value!=null ? a.value : (a.invested||0));
+        inv += fx(base, a.currency||acc.currency, acc.currency);
+      });
       balPrev = (acc.liquid||0) + inv;
     }catch(e){}
   }
@@ -927,37 +1109,34 @@ function drawAnalytics(){
   const title = accFilter ? `(${accountName(accFilter)})` : '(Todas)';
   const pctSpent = inc>0 ? +(exp/inc*100).toFixed(1) : 0;
 
-  // --- Plugin: SOLO % encima de la barra "Gastos" ---
-const gastosPercentPlugin = {
-  id:'gastosPercentPlugin',
-  afterDatasetsDraw(chart){
-    const meta = chart.getDatasetMeta(0);
-    const rect = meta?.data?.[1]; // barra "Gastos"
-    if(!rect) return;
+  // --- Plugin: % DENTRO de la barra "Gastos" ---
+  const gastosPercentPlugin = {
+    id:'gastosPercentPlugin',
+    afterDatasetsDraw(chart){
+      const meta = chart.getDatasetMeta(0);
+      const rect = meta?.data?.[1]; // barra "Gastos"
+      if(!rect) return;
 
-    const {ctx} = chart;
-    // props del rectángulo (Chart.js v3/v4)
-    const {x, y, base} = rect;
-    const top = Math.min(y, base);
-    const bottom = Math.max(y, base);
-    const height = bottom - top;
+      const {ctx} = chart;
+      const {x, y, base} = rect;
+      const top = Math.min(y, base);
+      const bottom = Math.max(y, base);
+      const height = bottom - top;
 
-    const cx = x;                           // centro horizontal
-    const cy = top + Math.min(76, height/2); // un poco por debajo del borde superior, pero siempre dentro
+      const cx = x;                           // centro horizontal
+      const cy = top + Math.min(76, Math.max(12, height*0.35)); // dentro de la barra
 
-    ctx.save();
-    ctx.textAlign='center';
-    ctx.textBaseline='middle';
-    ctx.font='12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-    // texto siempre dentro; si la barra es muy baja, queda centrado
-    ctx.fillStyle = '#fff';
-    ctx.fillText(`${pctSpent}%`, cx, cy);
-    ctx.restore();
-  }
-};
+      ctx.save();
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.font='12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(`${pctSpent}%`, cx, cy);
+      ctx.restore();
+    }
+  };
 
-
-  // --- Plugin: % dentro del trozo GRANDE del pastel; si es pequeño, nada (va al tooltip) ---
+  // --- Plugin: % dentro del trozo GRANDE del pastel; si es pequeño, nada (tooltip) ---
   const piePercentPlugin = {
     id:'piePercentPlugin',
     afterDatasetsDraw(chart){
@@ -974,14 +1153,12 @@ const gastosPercentPlugin = {
 
       meta.data.forEach((arc,i)=>{
         const val = +ds.data[i]||0; if(val<=0) return;
-        // Umbrales para decidir si cabe el texto dentro
         const angle = arc.circumference || 0;      // radianes
         const outer = arc.outerRadius || 0;
         const inner = arc.innerRadius || 0;
         const ringW = outer - inner;
         const bigEnough = (angle >= 0.6) && (outer >= 60) && (ringW >= 30);
-
-        if(!bigEnough) return; // si no cabe, que lo muestre el tooltip al tocar
+        if(!bigEnough) return; // si no cabe, solo tooltip
 
         const p = arc.tooltipPosition();
         const pct = +(val/total*100).toFixed(1);
@@ -992,7 +1169,7 @@ const gastosPercentPlugin = {
     }
   };
 
-  // --- Balance: Ingresos vs Gastos (solo % encima de Gastos). Totales en el subtítulo. ---
+  // --- Balance: Ingresos vs Gastos (solo % dentro de Gastos). Totales en el subtítulo. ---
   charts.incExp = new Chart(ctx1,{
     type:'bar',
     data:{ labels:['Ingresos','Gastos'], datasets:[{ data:[inc,exp] }] },
@@ -1039,8 +1216,6 @@ const gastosPercentPlugin = {
     plugins:[piePercentPlugin]
   });
 }
-
-
 
 
 
@@ -1101,7 +1276,7 @@ async function loadAssetsSummary(preferRTDB=true){
     let obj=null;
     if(preferRTDB){
       const s = await db.ref(`finance/${UID}/assets`).once('value');
-      if(s.exists()) obj = s.val(); // {accId:{assetId:{invested,currency,...}}}
+      if(s.exists()) obj = s.val(); // {accId:{assetId:{invested,value,currency}}}
     }
     if(!obj){
       ASSET_SUMS = lsGet(LS_KEY_FIN(), {asset_sums:{}}).asset_sums || {};
@@ -1112,7 +1287,8 @@ async function loadAssetsSummary(preferRTDB=true){
       const accCcy = ACCOUNTS?.[accId]?.currency || 'EUR';
       let sum = 0;
       Object.values(assets||{}).forEach(a=>{
-        sum += fx(a.invested||0, a.currency||accCcy, accCcy); // a moneda de la cuenta
+        const base = (a.value!=null ? a.value : (a.invested||0));
+        sum += fx(base, a.currency||accCcy, accCcy); // a moneda de la cuenta
       });
       sums[accId]= +sum.toFixed(2);
     });
@@ -1185,6 +1361,9 @@ async function fetchAccountMovements(accountId, limit=5, beforeTs=null, q=''){
 
 // ---------- Boot ----------
 document.addEventListener('DOMContentLoaded', async ()=>{
+  // Hook seguro al botón principal de la vista de cuenta
+  document.getElementById('accAddBtn')?.addEventListener('click', ()=>Fin.accountPrimaryAction());
+
   await Promise.all([loadAccounts(true), loadEntries(true)]);
   await loadAssetsSummary(true);
   for(const acc of Object.values(ACCOUNTS)){ await recomputeDailyRange(acc.id, 7); }
