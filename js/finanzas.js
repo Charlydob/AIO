@@ -191,19 +191,19 @@ function openMovementModal({mode='create', entry={}, forceAccountId}={}){
     submitText: mode==='edit' ? 'Guardar cambios' : 'Guardar',
     bodyHTML: movementModalHTML(entry, mode),
     onOpen: ()=>{
-      // Rellenar selects de cuentas
+      // Rellenar selects
       fillAccountsSelect('mv_acc', forceAccountId || entry.accountId);
       fillAccountsSelect('mv_dest', entry.destAccountId);
-      // quitar placeholder en destino y deshabilitar misma que origen
-      const destSel = document.getElementById('mv_dest');
-      const originSel = document.getElementById('mv_acc');
-      const typeSel = document.getElementById('mv_type');
-      const destWrap= document.getElementById('mv_dest_wrap');
 
-      const opt0 = destSel.querySelector('option[value=""]'); if(opt0) opt0.remove();
+      const destSel  = document.getElementById('mv_dest');
+      const originSel= document.getElementById('mv_acc');
+      const typeSel  = document.getElementById('mv_type');
+      const destWrap = document.getElementById('mv_dest_wrap');
+
+      // quitar "— Selecciona —" en destino
+      destSel.querySelector('option[value=""]')?.remove();
 
       function syncCcy(){
-        // moneda por defecto: moneda de la cuenta origen
         const acc = ACCOUNTS[originSel.value];
         document.getElementById('mv_ccy').value = entry.currency || acc?.currency || 'EUR';
       }
@@ -211,16 +211,13 @@ function openMovementModal({mode='create', entry={}, forceAccountId}={}){
         const isTransfer = typeSel.value==='traspaso';
         destWrap.classList.toggle('hidden', !isTransfer);
         if(isTransfer){
-          // deshabilita misma cuenta en destino
-          [...destSel.options].forEach(o=>o.disabled = (o.value===originSel.value));
+          [...destSel.options].forEach(o => o.disabled = (o.value===originSel.value));
           if(destSel.value===originSel.value){
             const first = [...destSel.options].find(o=>!o.disabled);
             destSel.value = first ? first.value : '';
           }
         }
       }
-      originSel.addEventListener('change', ()=>{ syncCcy(); toggleDest(); });
-      typeSel.addEventListener('change', toggleDest);
 
       // Set valores
       document.getElementById('mv_type').value = entry.type || 'gasto';
@@ -228,13 +225,17 @@ function openMovementModal({mode='create', entry={}, forceAccountId}={}){
       document.getElementById('mv_ccy').value  = entry.currency || 'EUR';
       syncCcy(); toggleDest();
 
-      // Si edición, hook borrar
+      originSel.addEventListener('change', ()=>{ syncCcy(); toggleDest(); });
+      typeSel.addEventListener('change', toggleDest);
+
+      // Borrado (solo en edición)
       if(mode==='edit'){
         document.getElementById('mv_delete').onclick = async ()=>{
           if(!confirm('¿Borrar movimiento?')) return;
           try{
             await db.ref(`finance/${UID}/entries/${entry.id}`).remove();
             const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}); delete store.entries[entry.id]; lsSet(LS_KEY_FIN(), store);
+
             closeModal();
             await loadEntries(true);
             await loadAssetsSummary(true);
@@ -242,7 +243,14 @@ function openMovementModal({mode='create', entry={}, forceAccountId}={}){
             if(entry.destAccountId) await recomputeDailyRange(entry.destAccountId, 60);
             await loadAccounts(true);
             Fin.refreshAll();
-            if(ACC_CURRENT && (ACC_CURRENT.id===entry.accountId || ACC_CURRENT.id===entry.destAccountId)) await Fin.openAccount(ACC_CURRENT.id, true);
+
+            // refrescos inmediatos en vistas activas
+            if (document.getElementById('tab-entries')?.classList.contains('active')) {
+              Fin.renderEntries();
+            }
+            if (ACC_CURRENT && (ACC_CURRENT.id===entry.accountId || ACC_CURRENT.id===entry.destAccountId)) {
+              Fin.openAccount(ACC_CURRENT.id, true);
+            }
           }catch(e){
             alert('Error al borrar');
           }
@@ -285,10 +293,18 @@ function openMovementModal({mode='create', entry={}, forceAccountId}={}){
       if(data.destAccountId) await recomputeDailyRange(data.destAccountId, 60);
       await loadAccounts(true);
       Fin.refreshAll();
-      if(ACC_CURRENT && (ACC_CURRENT.id===data.accountId || ACC_CURRENT.id===data.destAccountId)) await Fin.openAccount(ACC_CURRENT.id, true);
+
+      // refrescos inmediatos en vistas activas
+      if (document.getElementById('tab-entries')?.classList.contains('active')) {
+        Fin.renderEntries();
+      }
+      if (ACC_CURRENT && (ACC_CURRENT.id===data.accountId || ACC_CURRENT.id===data.destAccountId)) {
+        Fin.openAccount(ACC_CURRENT.id, true);
+      }
     }
   });
 }
+
 
 // ====== FIN API ======
 const Fin = {
