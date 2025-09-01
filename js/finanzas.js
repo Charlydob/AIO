@@ -910,7 +910,7 @@ function drawAnalytics(){
   if(charts.cat) charts.cat.destroy();
 
   const [from,to] = rangeDates();
-  const accFilter = ANALYTICS_ACC; // '' = todas
+  const accFilter = ANALYTICS_ACC || '';
 
   let inc=0, exp=0;
   const catMap = {};
@@ -927,92 +927,119 @@ function drawAnalytics(){
   const title = accFilter ? `(${accountName(accFilter)})` : '(Todas)';
   const pctSpent = inc>0 ? +(exp/inc*100).toFixed(1) : 0;
 
-  // --- Plugins ligeros de etiquetas ---
-  const labelPluginIncExp = {
-    id:'labelPluginIncExp',
-    afterDatasetsDraw(chart){
-      const {ctx} = chart;
-      const meta = chart.getDatasetMeta(0);
-      if(!meta?.data?.length) return;
+  // --- Plugin: SOLO % encima de la barra "Gastos" ---
+const gastosPercentPlugin = {
+  id:'gastosPercentPlugin',
+  afterDatasetsDraw(chart){
+    const meta = chart.getDatasetMeta(0);
+    const rect = meta?.data?.[1]; // barra "Gastos"
+    if(!rect) return;
 
-      const incPoint = meta.data[0]?.tooltipPosition?.();
-      const expPoint = meta.data[1]?.tooltipPosition?.();
+    const {ctx} = chart;
+    // props del rectángulo (Chart.js v3/v4)
+    const {x, y, base} = rect;
+    const top = Math.min(y, base);
+    const bottom = Math.max(y, base);
+    const height = bottom - top;
 
-      ctx.save();
-      ctx.textAlign='center';
-      ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+    const cx = x;                           // centro horizontal
+    const cy = top + Math.min(76, height/2); // un poco por debajo del borde superior, pero siempre dentro
 
-      // Ingresos: solo cantidad €
-      if(incPoint){
-        ctx.textBaseline='bottom';
-        ctx.fillText(euroLike(inc, DISPLAY_CCY), incPoint.x, incPoint.y - 4);
-      }
+    ctx.save();
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.font='12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+    // texto siempre dentro; si la barra es muy baja, queda centrado
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`${pctSpent}%`, cx, cy);
+    ctx.restore();
+  }
+};
 
-      // Gastos: cantidad € y debajo % de ingresos gastados
-      if(expPoint){
-        ctx.textBaseline='bottom';
-        ctx.fillText(euroLike(exp, DISPLAY_CCY), expPoint.x, expPoint.y - 4);
-        ctx.textBaseline='top';
-        const txt = inc>0 ? `(${pctSpent}% de ingresos)` : '(—)';
-        ctx.fillText(txt, expPoint.x, expPoint.y + 4);
-      }
-      ctx.restore();
-    }
-  };
 
+  // --- Plugin: % dentro del trozo GRANDE del pastel; si es pequeño, nada (va al tooltip) ---
   const piePercentPlugin = {
     id:'piePercentPlugin',
     afterDatasetsDraw(chart){
       const {ctx} = chart;
       const ds = chart.data.datasets[0];
+      if(!ds) return;
       const meta = chart.getDatasetMeta(0);
-      if(!ds?.data?.length) return;
-      const total = ds.data.reduce((a,b)=>a+(+b||0),0) || 1;
+      const total = (ds.data||[]).reduce((a,b)=>a+(+b||0),0) || 1;
 
       ctx.save();
       ctx.textAlign='center';
       ctx.textBaseline='middle';
-      ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-      meta.data.forEach((el,i)=>{
+      ctx.font='12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+
+      meta.data.forEach((arc,i)=>{
         const val = +ds.data[i]||0; if(val<=0) return;
-        const p = el.tooltipPosition();
+        // Umbrales para decidir si cabe el texto dentro
+        const angle = arc.circumference || 0;      // radianes
+        const outer = arc.outerRadius || 0;
+        const inner = arc.innerRadius || 0;
+        const ringW = outer - inner;
+        const bigEnough = (angle >= 0.6) && (outer >= 60) && (ringW >= 30);
+
+        if(!bigEnough) return; // si no cabe, que lo muestre el tooltip al tocar
+
+        const p = arc.tooltipPosition();
         const pct = +(val/total*100).toFixed(1);
         ctx.fillText(`${pct}%`, p.x, p.y);
       });
+
       ctx.restore();
     }
   };
 
-  // --- Bar: Ingresos vs Gastos ---
+  // --- Balance: Ingresos vs Gastos (solo % encima de Gastos). Totales en el subtítulo. ---
   charts.incExp = new Chart(ctx1,{
     type:'bar',
-    data:{ labels:['Ingresos','Gastos'], datasets:[{data:[inc,exp]}] },
+    data:{ labels:['Ingresos','Gastos'], datasets:[{ data:[inc,exp] }] },
     options:{
       responsive:true,
       scales:{ y:{ beginAtZero:true } },
       plugins:{
         legend:{ display:false },
         title:{ display:true, text:`Ingresos vs Gastos ${title}` },
-        subtitle:{ display:true, text:`Total ingresos: ${euroLike(inc)}   •   Total gastos: ${euroLike(exp)}${inc>0?`   •   % gastado: ${pctSpent}%`:''}` }
+        subtitle:{ display:true, text:`Ingresos: ${euroLike(inc, DISPLAY_CCY)}   •   Gastos: ${euroLike(exp, DISPLAY_CCY)}${inc>0?`   •   ${pctSpent}% de ingresos`:''}` },
+        tooltip:{ callbacks:{
+          label(ctx){
+            const v = ctx.parsed.y||0;
+            return `${ctx.label}: ${euroLike(v, DISPLAY_CCY)}`;
+          }
+        }}
       }
     },
-    plugins:[labelPluginIncExp]
+    plugins:[gastosPercentPlugin]
   });
 
-  // --- Pie: gasto por categoría con % en cada porción ---
+  // --- Pastel: Gasto por categoría. % dentro si cabe; si no, en tooltip al tocar. ---
+  const pieLabels = Object.keys(catMap);
+  const pieData   = Object.values(catMap);
   charts.cat = new Chart(ctx2,{
     type:'pie',
-    data:{ labels:Object.keys(catMap), datasets:[{data:Object.values(catMap)}] },
+    data:{ labels: pieLabels, datasets:[{ data: pieData }] },
     options:{
       responsive:true,
       plugins:{
         title:{ display:true, text:`Gasto por categoría ${title}` },
-        legend:{ position:'bottom' }
+        legend:{ position:'bottom' },
+        tooltip:{ callbacks:{
+          label(ctx){
+            const dataset = ctx.dataset.data||[];
+            const sum = dataset.reduce((a,b)=>a+(+b||0),0) || 1;
+            const v = +ctx.parsed||0;
+            const pct = +(v/sum*100).toFixed(1);
+            return `${ctx.label}: ${euroLike(v, DISPLAY_CCY)} · ${pct}%`;
+          }
+        }}
       }
     },
     plugins:[piePercentPlugin]
   });
 }
+
 
 
 
