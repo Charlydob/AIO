@@ -89,7 +89,13 @@
           <select id="fAcc" onchange="Fin.renderEntries()">
             <option value="">Cuenta: todas</option>
           </select>
-          <input id="fSearch" class="field" placeholder="Buscar… (texto, importe, categoría, cuenta)" oninput="Fin.renderEntries()" style="flex:1;min-width:140px">
+
+          <!-- Buscador con field correcto -->
+          <label class="field">
+            <span>Buscar</span>
+            <input id="fSearch" placeholder="Texto, importe, categoría, cuenta" oninput="Fin.renderEntries()">
+          </label>
+
           <div class="grow"></div>
           <button class="pill" onclick="Fin.showAdd()">＋ Movimiento</button>
         </div>
@@ -106,17 +112,13 @@
       </div>
     </section>
 
-    <!-- EDITOR DE MOVIMIENTO -->
+    <!-- EDITOR DE MOVIMIENTO (vista antigua; no se usa si trabajas solo con modal, pero no molesta) -->
     <section id="entry-editor" class="view">
       <div class="sheet">
         <h2 id="edTitle">Nuevo movimiento</h2>
-
-        <label class="field"><span>Cuenta (origen)</span>
-          <select id="eAccount"></select>
-        </label>
-
+        <label class="field"><span>Cuenta (origen)</span><select id="eAccount"></select></label>
         <label class="field"><span>Tipo</span>
-          <select id="eType" onchange="(function(v){const b=document.getElementById('destWrap');b.classList.toggle('hidden',v!=='traspaso');})(this.value)">
+          <select id="eType" onchange="(function(v){document.getElementById('eDestWrap').classList.toggle('hidden',v!=='traspaso');})(this.value)">
             <option value="ingreso">Ingreso</option>
             <option value="gasto">Gasto</option>
             <option value="salario">Salario</option>
@@ -124,32 +126,23 @@
             <option value="traspaso">Traspaso</option>
           </select>
         </label>
-
-<!-- DESTINO (solo si Tipo = traspaso) -->
-<div id="eDestWrap" class="field hidden">
-  <span>Cuenta destino</span>
-  <select id="eDestAccount"></select>
-</div>
-
-
+        <div id="eDestWrap" class="field hidden">
+          <span>Cuenta destino</span><select id="eDestAccount"></select>
+        </div>
         <label class="field"><span>Categoría</span>
           <select id="eCat">
             <option>Comida</option><option>Transporte</option><option>Casa</option>
             <option>Ocio</option><option>Salud</option><option>Otros</option>
           </select>
         </label>
-
         <label class="field"><span>Fecha</span><input id="eDate" type="date"/></label>
-
         <div class="row wrap">
           <label class="field grow"><span>Importe</span><input id="eAmount" type="number" step="0.01"/></label>
           <label class="field"><span>Moneda</span>
             <select id="eCurrency"><option>EUR</option><option>USD</option><option>GBP</option></select>
           </label>
         </div>
-
         <label class="field"><span>Notas</span><input id="eNote" /></label>
-
         <div class="row">
           <button class="pill ghost" onclick="Fin.closeEditor()">Cancelar</button>
           <div class="grow"></div>
@@ -175,9 +168,12 @@
 
         <canvas id="accChart" height="180" style="margin-top:10px"></canvas>
 
-        <!-- Buscador cuenta -->
+        <!-- Buscador cuenta (field correcto) -->
         <div class="row wrap" id="accSearchWrap" style="margin-top:8px">
-          <input id="accSearch" class="field" placeholder="Buscar en esta cuenta…" oninput="Fin.resetAndReloadAccountMovs()" style="flex:1;min-width:140px">
+          <label class="field">
+            <span>Buscar en cuenta</span>
+            <input id="accSearch" placeholder="Filtra por texto, categoría, importe…" oninput="Fin.resetAndReloadAccountMovs()">
+          </label>
         </div>
 
         <!-- NORMAL: lista de movimientos (lazy) -->

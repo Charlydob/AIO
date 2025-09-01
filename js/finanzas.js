@@ -1,6 +1,9 @@
-// Finanzas con CUENTAS (normales / inversión), movimientos por cuenta,
-// vista de detalle interna, activos de inversión, traspasos desde líquido,
-// moneda de visualización con conversión básica, y carga lazy de movimientos.
+// Finanzas con CUENTAS (normales / inversión), movimientos (crear/editar en MODAL único),
+// traspasos entre cuentas, activos de inversión, traspasos desde líquido,
+// moneda de visualización con conversión básica, carga lazy de movimientos,
+// patrimonio correcto (suma de balances por cuenta), y edición de cuentas.
+//
+// Todo unificado y sin editores "abajo": TODOS los botones abren el MISMO modal bonito.
 
 let ENTRIES = {};        // map de movimientos por id
 let ACCOUNTS = {};       // map de cuentas por id
@@ -13,7 +16,7 @@ let DISPLAY_CCY = 'EUR';
 let ACC_CURRENT = null;       // cuenta abierta en vista interna
 let ACC_MOV_OLDEST_TS = null; // paginación lazy
 let ACC_SEARCH_Q = '';        // búsqueda en lista de movimientos de cuenta
-let ASSET_SUMS = {}; // { [accountId]: sumaInvertidaEnMonedaDeLaCuenta }
+let ASSET_SUMS = {};          // { [accountId]: sumaInvertidaEnMonedaDeLaCuenta }
 
 const LS_KEY_FIN = ()=>`finance_${UID}`;
 const FX = { // tasas simple editables
@@ -44,7 +47,7 @@ function matchesQuery(e, q){
   return q.split(/\s+/).every(tok => hay.includes(tok));
 }
 
-// Calcula balance por día para una cuenta (en moneda de la CUENTA)
+// Calcula balance por día para una cuenta (en MONEDA DE LA CUENTA)
 function computeDailyBalanceForAccount(acc, dayKey){
   const accCcy = acc.currency || 'EUR';
 
@@ -96,6 +99,7 @@ function computeDailyBalanceForAccount(acc, dayKey){
 
   return +(liquid + investedAcc).toFixed(2);
 }
+
 // Recalcula y sube balances diarios de los últimos N días (ligero)
 async function recomputeDailyRange(accountId, daysBack=90){
   const acc = ACCOUNTS[accountId]; if(!acc) return;
@@ -121,7 +125,6 @@ function openModal({title, bodyHTML, submitText='Aceptar', onSubmit, onOpen}){
   btn.textContent = submitText;
   btn.onclick = async ()=>{ if(onSubmit) await onSubmit(); };
 
-  // asegura que los elementos existen antes de enlazar eventos
   requestAnimationFrame(()=>{ if(typeof onOpen==='function') onOpen(); });
 
   document.getElementById('modal').classList.remove('hidden');
@@ -132,9 +135,164 @@ function closeModal(){
   document.getElementById('modalBackdrop').classList.add('hidden');
 }
 
+// ====== UI MOVIMIENTO: MODAL ÚNICO (crear/editar) ======
+function movementModalHTML(entry={}, mode='create'){
+  const today = new Date().toISOString().slice(0,10);
+  const isTransfer = entry.type==='traspaso';
+  return `
+    <label class="field"><span>Cuenta (origen)</span>
+      <select id="mv_acc"></select>
+    </label>
+
+    <div class="row wrap">
+      <label class="field grow"><span>Tipo</span>
+        <select id="mv_type">
+          <option value="gasto">Gasto</option>
+          <option value="ingreso">Ingreso</option>
+          <option value="salario">Salario</option>
+          <option value="inversion">Inversión</option>
+          <option value="traspaso">Traspaso</option>
+        </select>
+      </label>
+      <label class="field"><span>Categoría</span>
+        <select id="mv_cat">
+          <option>Comida</option><option>Transporte</option><option>Casa</option>
+          <option>Ocio</option><option>Salud</option><option>Otros</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="mv_dest_wrap" class="${isTransfer?'':'hidden'}">
+      <label class="field"><span>Cuenta destino</span>
+        <select id="mv_dest"></select>
+      </label>
+    </div>
+
+    <label class="field"><span>Fecha</span><input id="mv_date" type="date" value="${entry.date||today}"/></label>
+    <div class="row wrap">
+      <label class="field grow"><span>Importe</span><input id="mv_amount" type="number" step="0.01" value="${entry.amount??''}"/></label>
+      <label class="field"><span>Moneda</span>
+        <select id="mv_ccy"><option>EUR</option><option>USD</option><option>GBP</option></select>
+      </label>
+    </div>
+    <label class="field"><span>Notas</span><input id="mv_note" value="${(entry.note||'').replace(/"/g,'&quot;')}"/></label>
+
+    ${mode==='edit' ? `
+      <div class="row" style="margin-top:6px">
+        <button class="pill danger" id="mv_delete">Borrar</button>
+        <div class="grow"></div>
+      </div>
+    `:''}
+  `;
+}
+function openMovementModal({mode='create', entry={}, forceAccountId}={}){
+  openModal({
+    title: mode==='edit' ? 'Editar movimiento' : 'Nuevo movimiento',
+    submitText: mode==='edit' ? 'Guardar cambios' : 'Guardar',
+    bodyHTML: movementModalHTML(entry, mode),
+    onOpen: ()=>{
+      // Rellenar selects de cuentas
+      fillAccountsSelect('mv_acc', forceAccountId || entry.accountId);
+      fillAccountsSelect('mv_dest', entry.destAccountId);
+      // quitar placeholder en destino y deshabilitar misma que origen
+      const destSel = document.getElementById('mv_dest');
+      const originSel = document.getElementById('mv_acc');
+      const typeSel = document.getElementById('mv_type');
+      const destWrap= document.getElementById('mv_dest_wrap');
+
+      const opt0 = destSel.querySelector('option[value=""]'); if(opt0) opt0.remove();
+
+      function syncCcy(){
+        // moneda por defecto: moneda de la cuenta origen
+        const acc = ACCOUNTS[originSel.value];
+        document.getElementById('mv_ccy').value = entry.currency || acc?.currency || 'EUR';
+      }
+      function toggleDest(){
+        const isTransfer = typeSel.value==='traspaso';
+        destWrap.classList.toggle('hidden', !isTransfer);
+        if(isTransfer){
+          // deshabilita misma cuenta en destino
+          [...destSel.options].forEach(o=>o.disabled = (o.value===originSel.value));
+          if(destSel.value===originSel.value){
+            const first = [...destSel.options].find(o=>!o.disabled);
+            destSel.value = first ? first.value : '';
+          }
+        }
+      }
+      originSel.addEventListener('change', ()=>{ syncCcy(); toggleDest(); });
+      typeSel.addEventListener('change', toggleDest);
+
+      // Set valores
+      document.getElementById('mv_type').value = entry.type || 'gasto';
+      document.getElementById('mv_cat').value  = entry.category || 'Otros';
+      document.getElementById('mv_ccy').value  = entry.currency || 'EUR';
+      syncCcy(); toggleDest();
+
+      // Si edición, hook borrar
+      if(mode==='edit'){
+        document.getElementById('mv_delete').onclick = async ()=>{
+          if(!confirm('¿Borrar movimiento?')) return;
+          try{
+            await db.ref(`finance/${UID}/entries/${entry.id}`).remove();
+            const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}); delete store.entries[entry.id]; lsSet(LS_KEY_FIN(), store);
+            closeModal();
+            await loadEntries(true);
+            await loadAssetsSummary(true);
+            await recomputeDailyRange(entry.accountId, 60);
+            if(entry.destAccountId) await recomputeDailyRange(entry.destAccountId, 60);
+            await loadAccounts(true);
+            Fin.refreshAll();
+            if(ACC_CURRENT && (ACC_CURRENT.id===entry.accountId || ACC_CURRENT.id===entry.destAccountId)) await Fin.openAccount(ACC_CURRENT.id, true);
+          }catch(e){
+            alert('Error al borrar');
+          }
+        };
+      }
+    },
+    onSubmit: async ()=>{
+      const data = {
+        accountId: document.getElementById('mv_acc').value,
+        type:      document.getElementById('mv_type').value,
+        category:  document.getElementById('mv_cat').value,
+        date:      document.getElementById('mv_date').value || ymd(),
+        amount:    parseFloat(document.getElementById('mv_amount').value||'0')||0,
+        currency:  document.getElementById('mv_ccy').value,
+        note:      document.getElementById('mv_note').value||'',
+        ts:        mode==='edit' ? (entry.ts||Date.now()) : Date.now()
+      };
+      if(!data.accountId) return alert('Selecciona cuenta origen');
+
+      if(data.type==='traspaso'){
+        data.destAccountId = document.getElementById('mv_dest').value || '';
+        if(!data.destAccountId) return alert('Selecciona cuenta destino');
+        if(data.destAccountId === data.accountId) return alert('Origen y destino no pueden coincidir');
+      }else{
+        delete data.destAccountId;
+      }
+
+      const base = `finance/${UID}`;
+      const eid = mode==='edit' ? entry.id : id();
+      try{
+        if(mode==='edit'){ await db.ref(`${base}/entries/${eid}`).update(data); }
+        else{ await db.ref(`${base}/entries/${eid}`).set({...data,id:eid}); }
+        mirrorEntryLS({...data,id:eid});
+      }catch(e){ /* espejo LS ya escrito */ }
+
+      closeModal();
+      await loadEntries(true);
+      await loadAssetsSummary(true);
+      await recomputeDailyRange(data.accountId, 60);
+      if(data.destAccountId) await recomputeDailyRange(data.destAccountId, 60);
+      await loadAccounts(true);
+      Fin.refreshAll();
+      if(ACC_CURRENT && (ACC_CURRENT.id===data.accountId || ACC_CURRENT.id===data.destAccountId)) await Fin.openAccount(ACC_CURRENT.id, true);
+    }
+  });
+}
+
+// ====== FIN API ======
 const Fin = {
   setDisplayCurrency(v){ DISPLAY_CCY=v; Fin.refreshAll(); if(ACC_CURRENT) Fin.openAccount(ACC_CURRENT.id,true); },
-
   onRangeChange(v){ RANGE=v; Fin.refreshAll(); },
 
   switchTab(name){
@@ -148,27 +306,96 @@ const Fin = {
   },
 
   // ---------- Cuentas ----------
-  async showAddAccount(){
-    // (esta versión con prompt puede quedar sobreescrita por la de modal más abajo)
-    const name = prompt('Nombre de la cuenta:'); if(!name) return;
-    const type = prompt('Tipo: normal / inversion','normal')?.toLowerCase()==='inversion'?'inversion':'normal';
-    const color = prompt('Color hex (#RRGGBB):', '#3a86ff') || '#3a86ff';
-    const currency = prompt('Moneda (EUR/USD/GBP):','EUR') || 'EUR';
-    let initBalance = 0, liquid = 0;
-    if(type==='normal'){
-      initBalance = parseFloat(prompt('Saldo inicial:', '0')||'0')||0;
-    }else{
-      liquid = parseFloat(prompt('Líquido inicial (puede ser 0):','0')||'0')||0;
-    }
-    const idA = id();
-    const acc = { id:idA, name, color, type, currency, createdAt:Date.now(), initBalance, balance:initBalance, liquid: (type==='inversion'? liquid: undefined) };
+  showAddAccount: async function(){
+    openModal({
+      title:'Nueva cuenta',
+      submitText:'Crear',
+      bodyHTML: `
+        <label class="field"><span>Nombre</span><input id="acc_name" placeholder="Mi cuenta"/></label>
+        <label class="field"><span>Tipo</span>
+          <select id="acc_type"><option value="normal">Normal</option><option value="inversion">Cuenta de Inversión</option></select>
+        </label>
+        <div class="row wrap">
+          <label class="field grow"><span>Color</span><input id="acc_color" type="color" value="#3a86ff"/></label>
+          <label class="field"><span>Moneda</span><select id="acc_ccy"><option>EUR</option><option>USD</option><option>GBP</option></select></label>
+        </div>
+        <div id="acc_block_normal">
+          <label class="field"><span>Saldo inicial</span><input id="acc_init" type="number" step="0.01" value="0"/></label>
+        </div>
+        <div id="acc_block_inv" class="hidden">
+          <label class="field"><span>Líquido inicial</span><input id="acc_liq" type="number" step="0.01" value="0"/></label>
+        </div>
+      `,
+      onOpen: ()=>{
+        const sel = document.getElementById('acc_type');
+        const normal = document.getElementById('acc_block_normal');
+        const inv = document.getElementById('acc_block_inv');
+        function toggle(){ const isInv = sel.value==='inversion'; normal.classList.toggle('hidden', isInv); inv.classList.toggle('hidden', !isInv); }
+        sel.addEventListener('change', toggle); toggle();
+      },
+      onSubmit: async ()=>{
+        const name = document.getElementById('acc_name').value.trim(); if(!name) return alert('Nombre requerido');
+        const type = document.getElementById('acc_type').value;
+        const color= document.getElementById('acc_color').value||'#3a86ff';
+        const currency = document.getElementById('acc_ccy').value||'EUR';
+        const initBalance = parseFloat(document.getElementById('acc_init')?.value||'0')||0;
+        const liquidInit  = parseFloat(document.getElementById('acc_liq')?.value||'0')||0;
 
-    try{ await db.ref(`finance/${UID}/accounts/${idA}`).set(acc); }
-    catch(e){ console.warn('RTDB add account:', e); }
+        const idA = id();
+        const acc = {
+          id:idA, name, color, type, currency, createdAt:Date.now(),
+          initBalance: type==='normal'? initBalance:0,
+          balance:     type==='normal'? initBalance:0,
+          liquidInit:  type==='inversion'? liquidInit: undefined,
+          liquid:      type==='inversion'? liquidInit: undefined
+        };
+        try{ await db.ref(`finance/${UID}/accounts/${idA}`).set(acc); }catch(e){}
+        const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}); store.accounts[idA]=acc; lsSet(LS_KEY_FIN(), store);
+        closeModal(); await loadAccounts(true); await recomputeDailyRange(idA, 7); Fin.refreshAll();
+      }
+    });
+  },
 
-    const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}});
-    store.accounts[idA]=acc; lsSet(LS_KEY_FIN(), store);
-    await loadAccounts(true);
+  editAccount: async function(id){
+    const acc = ACCOUNTS[id]; if(!acc) return;
+    openModal({
+      title:'Editar cuenta',
+      submitText:'Guardar',
+      bodyHTML: `
+        <label class="field"><span>Nombre</span><input id="ea_name" value="${acc.name.replace(/"/g,'&quot;')}"/></label>
+        <div class="row wrap">
+          <label class="field grow"><span>Color</span><input id="ea_color" type="color" value="${acc.color||'#3a86ff'}"/></label>
+          <label class="field"><span>Moneda</span>
+            <select id="ea_ccy"><option ${acc.currency==='EUR'?'selected':''}>EUR</option><option ${acc.currency==='USD'?'selected':''}>USD</option><option ${acc.currency==='GBP'?'selected':''}>GBP</option></select>
+          </label>
+        </div>
+        ${acc.type==='normal' ? `
+          <label class="field"><span>Saldo inicial</span><input id="ea_init" type="number" step="0.01" value="${acc.initBalance||0}"/></label>
+        `:`
+          <label class="field"><span>Líquido</span><input id="ea_liq" type="number" step="0.01" value="${acc.liquid||acc.liquidInit||0}"/></label>
+        `}
+      `,
+      onSubmit: async ()=>{
+        const name = document.getElementById('ea_name').value.trim() || acc.name;
+        const color= document.getElementById('ea_color').value || acc.color;
+        const ccy  = document.getElementById('ea_ccy').value || acc.currency;
+        const patch = { name, color, currency: ccy };
+        if(acc.type==='normal'){
+          const init = parseFloat(document.getElementById('ea_init').value||'0')||0;
+          patch.initBalance = init; patch.balance = init; // balance base
+        }else{
+          const liq = parseFloat(document.getElementById('ea_liq').value||'0')||0;
+          patch.liquid = liq; if(acc.liquidInit==null) patch.liquidInit = liq;
+        }
+        try{ await db.ref(`finance/${UID}/accounts/${id}`).update(patch); }catch(e){}
+        ACCOUNTS[id] = {...acc, ...patch};
+        const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}); store.accounts[id] = ACCOUNTS[id]; lsSet(LS_KEY_FIN(), store);
+        closeModal();
+        await recomputeDailyRange(id, 90);
+        Fin.refreshAll();
+        if(ACC_CURRENT?.id===id) await Fin.openAccount(id, true);
+      }
+    });
   },
 
   async openAccount(id, keepView=false){
@@ -184,20 +411,17 @@ const Fin = {
     document.getElementById('accMoreWrap').style.display = (acc.type==='inversion') ? 'none'  : 'flex';
     document.getElementById('accSearchWrap')?.classList.toggle('hidden', acc.type==='inversion');
 
-    // Datos
     await Fin.refreshAccountHeader();
 
-    // Contenidos
     if(acc.type==='inversion'){
       await Fin.renderAssets();
     }else{
       ACC_MOV_OLDEST_TS = null;
       document.getElementById('accMovs').innerHTML='';
-      await Fin.loadMoreAccountMovs(); // 5 más
+      await Fin.loadMoreAccountMovs();
     }
 
     if(!keepView){
-      // abrir pantalla de cuenta
       document.querySelectorAll('section.view').forEach(v=>v.classList.remove('active'));
       document.getElementById('account-view').classList.add('active');
     }
@@ -212,8 +436,6 @@ const Fin = {
 
   async refreshAccountHeader(){
     const acc = ACC_CURRENT; if(!acc) return;
-
-    // recalcular balance actual desde init + movimientos (cuenta y, si inversión, líquido + activos)
     const { balanceNow, liquidNow } = computeAccountBalances(acc);
     const prevMonthPct = await computeDeltaVsPrevMonth(acc, balanceNow);
 
@@ -226,7 +448,6 @@ const Fin = {
       document.getElementById('accLiquid').textContent = euroLike(fx(liquidNow, acc.currency, DISPLAY_CCY), DISPLAY_CCY);
     }
 
-    // Gráfico simple (acumulado diario últimos 90d)
     await drawAccountChart(acc.id, acc.currency);
   },
 
@@ -242,16 +463,19 @@ const Fin = {
     if(list.length===0){ document.getElementById('accMoreWrap').style.display='none'; return; }
     const wrap = document.getElementById('accMovs');
     list.forEach(e=>{
-      const card = document.createElement('div'); card.className='card';
+      const card = document.createElement('div'); card.className='card compact';
+      const dest = e.destAccountId ? `<div class="chip arrow">→ ${accountName(e.destAccountId)}</div>` : '';
       card.innerHTML = `
-        <div class="row">
-          <div class="chip">${e.date}</div>
+        <div class="row tight">
+          <div class="chip date">${e.date}</div>
           <div class="chip">${e.type}</div>
           ${e.category?`<div class="chip">${e.category}</div>`:''}
+          ${dest}
           <div class="grow"></div>
-          <div class="chip">${euroLike(fx(e.amount, e.currency||'EUR', DISPLAY_CCY), DISPLAY_CCY)}</div>
+          <div class="chip amt ${e.type==='gasto'?'neg':'pos'}">${euroLike(fx(e.amount, e.currency||'EUR', DISPLAY_CCY), DISPLAY_CCY)}</div>
         </div>
-        ${e.note?`<div class="muted">${e.note}</div>`:''}
+        ${e.note?`<div class="muted small">${e.note}</div>`:''}
+        <div class="row"><button class="pill xs" onclick='Fin.openEdit("${e.id}")'>Editar</button></div>
       `;
       wrap.appendChild(card);
     });
@@ -291,7 +515,7 @@ const Fin = {
     });
   },
 
-  // === _fromLiquid/_toLiquid CORREGIDOS con FX + diarios ===
+  // líquido -> activo
   async _fromLiquid(accId, amount, ccy, assetId, fee){
     const base = `finance/${UID}`;
     const acc  = ACCOUNTS[accId]; const accCcy = acc?.currency || 'EUR';
@@ -309,6 +533,7 @@ const Fin = {
     await recomputeDailyRange(accId, 7);
   },
 
+  // activo -> líquido
   async _toLiquid(accId, amount, ccy, assetId){
     const base = `finance/${UID}`;
     const acc  = ACCOUNTS[accId]; const accCcy = acc?.currency || 'EUR';
@@ -325,103 +550,12 @@ const Fin = {
     await recomputeDailyRange(accId, 7);
   },
 
-  // ---------- Movimientos ----------
-showAdd(forceAccountId){
-  EDIT_ID = null;
-  document.getElementById('edTitle').textContent = 'Nuevo movimiento';
-  fillAccountsSelect('eAccount', forceAccountId);
-  setVal('eType','gasto');
-  setVal('eCat','Otros');
-  setVal('eDate', new Date().toISOString().slice(0,10));
-  setVal('eAmount','');
-  setVal('eCurrency','EUR');
-  setVal('eNote','');
-  document.getElementById('eDelete').classList.add('hidden');
-  openEditor();
-  setupEntryEditorUI(); // muestra/oculta destino si es traspaso
-},
-
-openEdit(id, obj){
-  EDIT_ID = id;
-  document.getElementById('edTitle').textContent = 'Editar movimiento';
-  fillAccountsSelect('eAccount', obj.accountId);
-  setVal('eType', obj.type);
-  setVal('eCat', obj.category || 'Otros');
-  setVal('eDate', obj.date);
-  setVal('eAmount', obj.amount);
-  setVal('eCurrency', obj.currency || 'EUR');
-  setVal('eNote', obj.note || '');
-  document.getElementById('eDelete').classList.remove('hidden');
-  openEditor();
-  setupEntryEditorUI(obj.destAccountId || ''); // preselecciona destino si existe
-},
-
-  closeEditor(){ closeEditor(); },
-
-  async saveEntry(){
-    try{
-      const amount = parseFloat(val('eAmount')||'0'); if(isNaN(amount)) return alert('Importe inválido');
-      const entry = {
-        accountId: val('eAccount'),
-        type: val('eType'),
-        category: val('eCat'),
-        date: val('eDate') || new Date().toISOString().slice(0,10),
-        amount, currency: val('eCurrency')||'EUR',
-        note: val('eNote')||'',
-        ts: Date.now()
-      };
-      if(!entry.accountId) return alert('Selecciona una cuenta');
-      const base = `finance/${UID}`;
-      const eid = EDIT_ID || id();
-      if(EDIT_ID){ await db.ref(`${base}/entries/${eid}`).update(entry); }
-      else{ await db.ref(`${base}/entries/${eid}`).set({...entry,id:eid}); }
-      mirrorEntryLS({...entry,id:eid});
-
-      closeEditor();
-      await loadEntries(true);
-      await loadAssetsSummary(true);
-      await recomputeDailyRange(entry.accountId, 60);
-      await loadAccounts(true); // para refrescar líquido de inversión si aplica
-      Fin.refreshAll();
-      if(ACC_CURRENT && ACC_CURRENT.id===entry.accountId) await Fin.openAccount(entry.accountId, true);
-    }catch(e){
-      console.error("save entry", e);
-      const eid = EDIT_ID || id();
-      const entry = {
-        accountId: val('eAccount'),
-        type: val('eType'),
-        category: val('eCat'),
-        date: val('eDate') || new Date().toISOString().slice(0,10),
-        amount: parseFloat(val('eAmount')||'0'),
-        currency: val('eCurrency')||'EUR',
-        note: val('eNote')||'',
-        ts: Date.now(), id:eid
-      };
-      mirrorEntryLS(entry);
-      closeEditor(); await loadEntries(false);
-      alert("⚠️ Guardado offline (RTDB falló).");
-    }
-  },
-
-  async deleteEntry(){
-    if(!EDIT_ID) return;
-    try{
-      if(!confirm('¿Borrar movimiento?')) return;
-      await db.ref(`finance/${UID}/entries/${EDIT_ID}`).remove();
-      const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}});
-      delete store.entries[EDIT_ID]; lsSet(LS_KEY_FIN(), store);
-      const accId = EDIT_OBJ?.accountId;
-      closeEditor(); await loadEntries(true);
-      if(accId) await recomputeDailyRange(accId, 60);
-      await loadAssetsSummary(true);
-      Fin.refreshAll();
-      if(ACC_CURRENT) await Fin.openAccount(ACC_CURRENT.id,true);
-    }catch(e){
-      const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}});
-      delete store.entries[EDIT_ID]; lsSet(LS_KEY_FIN(), store);
-      closeEditor(); await loadEntries(false);
-      alert("⚠️ Borrado offline (RTDB falló).");
-    }
+  // ---------- Movimientos (SIEMPRE modal) ----------
+  showAdd(forceAccountId){ openMovementModal({mode:'create', entry:{}, forceAccountId}); },
+  openEdit(id){
+    const e = ENTRIES[id]; if(!e) return;
+    EDIT_ID = id; EDIT_OBJ = e;
+    openMovementModal({mode:'edit', entry:e});
   },
 
   renderEntries(){
@@ -441,7 +575,7 @@ openEdit(id, obj){
       .sort((a,b)=>b.date.localeCompare(a.date) || b.ts-a.ts);
 
     if(list.length===0){
-      const empty=document.createElement('div'); empty.className='card';
+      const empty=document.createElement('div'); empty.className='card compact';
       empty.innerHTML='<div class="muted">Sin movimientos. Pulsa ＋ Movimiento.</div>';
       wrap.appendChild(empty); return;
     }
@@ -453,40 +587,42 @@ openEdit(id, obj){
       (groups[ym] = groups[ym] || {items:[], inc:0, exp:0}).items.push(e);
       const v = fx(e.amount, e.currency||'EUR', DISPLAY_CCY);
       if(e.type==='gasto') groups[ym].exp += v;
-      if(e.type==='ingreso'||e.type==='salario'||e.type==='inversion') groups[ym].inc += v;
+      if(['ingreso','salario','inversion'].includes(e.type)) groups[ym].inc += v;
     });
 
     Object.keys(groups).sort().reverse().forEach(ym=>{
       const g = groups[ym];
-      const header=document.createElement('div'); header.className='card';
+      const header=document.createElement('div'); header.className='card compact';
       const monthLabel = monthHuman(ym);
       const net = g.inc - g.exp;
       header.innerHTML = `
         <div class="row">
           <div class="chip">${monthLabel}</div>
           <div class="grow"></div>
-          <div class="chip" style="background:#3a86ff22;border-color:#3a86ff44">Ingresos: ${euroLike(g.inc)}</div>
-          <div class="chip" style="background:#e2555522;border-color:#e2555544">Gastos: ${euroLike(g.exp)}</div>
-          <div class="chip" style="background:${net>=0?'#21c28a22':'#e2555522'};border-color:${net>=0?'#21c28a44':'#e2555544'}">Saldo: ${euroLike(net)}</div>
+          <div class="chip info">Ingresos: ${euroLike(g.inc)}</div>
+          <div class="chip warn">Gastos: ${euroLike(g.exp)}</div>
+          <div class="chip ${net>=0?'ok':'bad'}">Saldo: ${euroLike(net)}</div>
         </div>
       `;
       wrap.appendChild(header);
 
       g.items.forEach(e=>{
-        const card=document.createElement('div'); card.className='card';
+        const card=document.createElement('div'); card.className='card compact';
+        const dest = e.destAccountId ? `<div class="chip arrow">→ ${accountName(e.destAccountId)}</div>` : '';
         card.innerHTML = `
-          <div class="row">
-            <div class="chip">${e.date}</div>
+          <div class="row tight">
+            <div class="chip date">${e.date}</div>
             <div class="chip">${ accountName(e.accountId) }</div>
             <div class="chip">${e.type}</div>
             ${e.category?`<div class="chip">${e.category}</div>`:''}
+            ${dest}
             <div class="grow"></div>
-            <div class="chip" style="background:${e.type==='gasto'?'#e2555522':'#3a86ff22'};border-color:${e.type==='gasto'?'#e2555544':'#3a86ff44'}">
+            <div class="chip amt ${e.type==='gasto'?'neg':'pos'}">
               ${euroLike(fx(e.amount, e.currency||'EUR', DISPLAY_CCY))}
             </div>
           </div>
-          ${e.note?`<p class="muted">${e.note}</p>`:''}
-          <div class="row"><button class="pill" onclick='Fin.openEdit("${e.id}", ${JSON.stringify(e).replace(/"/g,'&quot;')})'>Editar</button></div>
+          ${e.note?`<p class="muted small">${e.note}</p>`:''}
+          <div class="row"><button class="pill xs" onclick='Fin.openEdit("${e.id}")'>Editar</button></div>
         `;
         wrap.appendChild(card);
       });
@@ -514,7 +650,6 @@ openEdit(id, obj){
 
   async refreshAll(){
     renderAccounts();
-    fillAccountsSelect('eAccount');
     populateFilterAccounts();
     updateStats();
     drawNetWorth();
@@ -528,14 +663,15 @@ openEdit(id, obj){
     const wrap = document.getElementById('accMovs'); if(wrap) wrap.innerHTML='';
     const more = document.getElementById('accMoreWrap'); if(more) more.style.display='flex';
     Fin.loadMoreAccountMovs();
-  }
+  },
+
+  // Proxy para el FAB y el botón de la lista
+  quickAddMovement(){ Fin.showAdd(); }
 };
 
 // ---------- Helpers de DOM/estado ----------
 function setVal(id,v){ const el=document.getElementById(id); if(el) el.value=v; }
 function val(id){ return document.getElementById(id)?.value || ''; }
-function openEditor(){ document.getElementById('entry-editor').classList.add('active'); }
-function closeEditor(){ document.getElementById('entry-editor').classList.remove('active'); }
 function accountName(id){ return ACCOUNTS?.[id]?.name || '—'; }
 function fillAccountsSelect(id, preferId){
   const sel = document.getElementById(id); if(!sel) return;
@@ -591,51 +727,7 @@ function sumNetWorthFromAccounts(){
   });
   return total;
 }
-// 4) Editor: guardar traspaso con cuenta destino
-Fin.saveEntry = async function(){
-  try{
-    const amount = parseFloat(val('eAmount')||'0'); if(isNaN(amount)) return alert('Importe inválido');
-    const type = val('eType');
-    const entry = {
-      accountId: val('eAccount'),
-      type,
-      category: val('eCat'),
-      date: val('eDate') || new Date().toISOString().slice(0,10),
-      amount, currency: val('eCurrency')||'EUR',
-      note: val('eNote')||'',
-      ts: Date.now()
-    };
-    if(!entry.accountId) return alert('Selecciona cuenta origen');
 
-    // destino para traspaso
-    if(type==='traspaso'){
-      entry.destAccountId = document.getElementById('eDestAccount').value || '';
-      if(!entry.destAccountId) return alert('Selecciona cuenta destino');
-      if(entry.destAccountId === entry.accountId) return alert('Origen y destino no pueden ser la misma cuenta');
-    }else{
-      delete entry.destAccountId;
-    }
-
-    const base = `finance/${UID}`;
-    const eid = EDIT_ID || id();
-    if(EDIT_ID){ await db.ref(`${base}/entries/${eid}`).update(entry); }
-    else{ await db.ref(`${base}/entries/${eid}`).set({...entry,id:eid}); }
-    mirrorEntryLS({...entry,id:eid});
-
-    closeEditor();
-    await loadEntries(true);
-    await loadAssetsSummary(true);
-    // recomputa las cuentas implicadas
-    await recomputeDailyRange(entry.accountId, 60);
-    if(entry.destAccountId) await recomputeDailyRange(entry.destAccountId, 60);
-    await loadAccounts(true);
-    Fin.refreshAll();
-    if(ACC_CURRENT && (ACC_CURRENT.id===entry.accountId || ACC_CURRENT.id===entry.destAccountId)) await Fin.openAccount(ACC_CURRENT.id, true);
-  }catch(e){
-    console.error("save entry", e);
-    alert("⚠️ Falló RTDB. Intenta de nuevo.");
-  }
-};
 function computeAccountBalances(acc){
   const accCcy = acc.currency || 'EUR';
 
@@ -678,9 +770,7 @@ function computeAccountBalances(acc){
 }
 
 async function computeDeltaVsPrevMonth(acc, balanceNow){
-  // % vs fin del mes anterior: (now - endPrev) / |endPrev|
   const prevEnd = endOfPrevMonth();
-  // sum hasta prevEnd en moneda de cuenta
   let balPrev = acc.initBalance||0;
   Object.values(ENTRIES).forEach(e=>{
     if(e.accountId!==acc.id) return;
@@ -692,7 +782,6 @@ async function computeDeltaVsPrevMonth(acc, balanceNow){
     }
   });
 
-  // activos + líquido: aproximado (sin valoración de mercado)
   if(acc.type==='inversion'){
     try{
       const s=await db.ref(`finance/${UID}/assets/${acc.id}`).once('value');
@@ -717,11 +806,9 @@ async function drawAccountChart(accId, accCcy){
   const ctx = document.getElementById('accChart').getContext('2d');
   if(charts.acc) charts.acc.destroy();
 
-  // últimos 90 días acumulado
   const to = new Date(); const from = new Date(); from.setDate(to.getDate()-89);
   const labels=[], data=[]; let acc=0;
 
-  // mapa de variaciones por día (cuenta)
   const map={};
   Object.values(ENTRIES).forEach(e=>{
     if(e.accountId!==accId) return;
@@ -730,7 +817,6 @@ async function drawAccountChart(accId, accCcy){
     map[k]=(map[k]||0) + (e.type==='gasto' ? -v : v);
   });
 
-  // base inicial hasta el día -90
   let base = 0;
   Object.values(ENTRIES).forEach(e=>{
     if(e.accountId!==accId) return;
@@ -750,7 +836,7 @@ async function drawAccountChart(accId, accCcy){
 }
 
 // ---------- Net / Analytics ----------
-// === 1) Patrimonio correcto (suma de cuentas por día) ===
+// Patrimonio correcto (suma de cuentas por día)
 function drawNetWorth(){
   const ctx = document.getElementById('netWorthChart').getContext('2d');
   if(charts.net) charts.net.destroy();
@@ -764,7 +850,6 @@ function drawNetWorth(){
     const key = ymd(d);
     labels.push(key.slice(5));
 
-    // suma de balances de TODAS las cuentas en DISPLAY_CCY
     let sum = 0;
     Object.values(ACCOUNTS).forEach(acc=>{
       const balAccCcy = computeDailyBalanceForAccount(acc, key); // moneda de la cuenta
@@ -814,7 +899,6 @@ async function loadEntries(preferRTDB=true){
     ENTRIES = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}).entries || {};
   }
 }
-// === 2) Carga de cuentas SIN refrescar (se refresca tras assets) ===
 async function loadAccounts(preferRTDB=true){
   try{
     let obj=null;
@@ -824,8 +908,7 @@ async function loadAccounts(preferRTDB=true){
     }
     if(!obj){ obj = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}).accounts; }
     else{
-      const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}});
-      store.accounts=obj; lsSet(LS_KEY_FIN(), store);
+      const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}); store.accounts=obj; lsSet(LS_KEY_FIN(), store);
     }
     ACCOUNTS = obj||{};
   }catch(e){
@@ -840,7 +923,6 @@ async function loadAssetsSummary(preferRTDB=true){
       if(s.exists()) obj = s.val(); // {accId:{assetId:{invested,currency,...}}}
     }
     if(!obj){
-      // intenta cache previa
       ASSET_SUMS = lsGet(LS_KEY_FIN(), {asset_sums:{}}).asset_sums || {};
       return;
     }
@@ -854,45 +936,62 @@ async function loadAssetsSummary(preferRTDB=true){
       sums[accId]= +sum.toFixed(2);
     });
     ASSET_SUMS = sums;
-    const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}, asset_sums:{}});
-    store.asset_sums = sums; lsSet(LS_KEY_FIN(), store);
+    const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}, asset_sums:{}}); store.asset_sums = sums; lsSet(LS_KEY_FIN(), store);
   }catch(e){
     ASSET_SUMS = lsGet(LS_KEY_FIN(), {asset_sums:{}}).asset_sums || {};
   }
 }
 function mirrorEntryLS(entry){
-  const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}});
-  store.entries[entry.id]=entry; lsSet(LS_KEY_FIN(), store);
+  const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}); store.entries[entry.id]=entry; lsSet(LS_KEY_FIN(), store);
 }
 
-// === 3) Botón Abrir fiable (listeners en vez de inline) ===
-function renderAccounts(){
+// ---------- UI cuentas ----------
+async function renderAccounts(){
   const wrap = document.getElementById('accountsList'); if(!wrap) return;
   wrap.innerHTML='';
+
   const arr = Object.values(ACCOUNTS).sort((a,b)=>a.createdAt-b.createdAt);
 
-  arr.forEach(a=>{
+  // precalcular balances y deltas
+  const cards = await Promise.all(arr.map(async a=>{
     const { balanceNow } = computeAccountBalances(a);
-    const card = document.createElement('div'); card.className='account-card'; card.style.borderColor=a.color+'44';
+    const delta = await computeDeltaVsPrevMonth(a, balanceNow);
+    const up = delta>=0;
+    const arrow = up ? '▲' : '▼';
+    const typeLabel = (a.type==='inversion'?'Inversión':'Normal');
+
+    const card = document.createElement('div');
+    card.className='account-card';
+    card.style.borderColor = (a.color||'#1a2230') + '44';
+
     card.innerHTML = `
       <div class="account-head">
-        <div class="account-swatch" style="background:${a.color}"></div>
+        <div class="account-swatch" style="background:${a.color||'#3a86ff'}"></div>
         <div class="account-name">${a.name}</div>
-        <div class="grow"></div>
-        <div class="account-type">${a.type==='inversion'?'Inversión':'Normal'}</div>
+        <div class="account-meta">
+          <div class="account-type">${typeLabel}</div>
+          <div class="account-ccy">${a.currency||'EUR'}</div>
+          <div class="account-delta ${up?'up':'down'}">${arrow} ${Math.abs(delta).toFixed(1)}%</div>
+        </div>
       </div>
+
       <div class="account-balance">${euroLike(balanceNow)}</div>
-      <div class="row">
-        <div class="chip">${a.currency}</div>
-        ${a.type==='inversion'?'<div class="chip">Líquido</div>':''}
-        <div class="grow"></div>
-        <button class="pill ghost" data-open="${a.id}">Abrir</button>
+
+      <div class="account-actions">
+        <button class="pill ghost sm" data-edit="${a.id}">Editar</button>
+        <button class="pill sm" data-open="${a.id}">Abrir</button>
       </div>
     `;
-    wrap.appendChild(card);
+
     card.querySelector('[data-open]').addEventListener('click', ()=>Fin.openAccount(a.id));
-  });
+    card.querySelector('[data-edit]').addEventListener('click', ()=>Fin.editAccount(a.id));
+
+    return card;
+  }));
+
+  cards.forEach(c=>wrap.appendChild(c));
 }
+
 
 // ---------- Movimientos por cuenta (paginado + filtro) ----------
 async function fetchAccountMovements(accountId, limit=5, beforeTs=null, q=''){
@@ -904,7 +1003,6 @@ async function fetchAccountMovements(accountId, limit=5, beforeTs=null, q=''){
 }
 
 // ---------- Boot ----------
-// === 4) Boot: refrescar SOLO tras assets + diarios (coherente con patrimonio) ===
 document.addEventListener('DOMContentLoaded', async ()=>{
   await Promise.all([loadAccounts(true), loadEntries(true)]);
   await loadAssetsSummary(true);
@@ -915,419 +1013,3 @@ window.Fin = Fin;
 
 // ---------- Utils menores ----------
 function monthHuman(ym){ const [y,m]=ym.split('-').map(Number); return new Date(y,m-1,1).toLocaleDateString('es-ES',{ month:'long', year:'numeric' }); }
-
-// === Modal de creación de cuenta (opción bonita) — SOBRESCRIBE la versión prompt ===
-Fin.showAddAccount = async function(){
-  openModal({
-    title:'Nueva cuenta',
-    submitText:'Crear',
-    bodyHTML: `
-      <label class="field"><span>Nombre</span><input id="acc_name" placeholder="Mi cuenta"/></label>
-      <label class="field"><span>Tipo</span>
-        <select id="acc_type"><option value="normal">Normal</option><option value="inversion">Cuenta de Inversión</option></select>
-      </label>
-      <div class="row wrap">
-        <label class="field grow"><span>Color</span><input id="acc_color" type="color" value="#3a86ff"/></label>
-        <label class="field"><span>Moneda</span><select id="acc_ccy"><option>EUR</option><option>USD</option><option>GBP</option></select></label>
-      </div>
-      <div id="acc_block_normal">
-        <label class="field"><span>Saldo inicial</span><input id="acc_init" type="number" step="0.01" value="0"/></label>
-      </div>
-      <div id="acc_block_inv" class="hidden">
-        <label class="field"><span>Líquido inicial</span><input id="acc_liq" type="number" step="0.01" value="0"/></label>
-      </div>
-    `,
-    onOpen: ()=>{
-      const sel = document.getElementById('acc_type');
-      const normal = document.getElementById('acc_block_normal');
-      const inv = document.getElementById('acc_block_inv');
-      function toggle(){ const isInv = sel.value==='inversion'; normal.classList.toggle('hidden', isInv); inv.classList.toggle('hidden', !isInv); }
-      sel.addEventListener('change', toggle); toggle();
-    },
-    onSubmit: async ()=>{
-      const name = document.getElementById('acc_name').value.trim(); if(!name) return alert('Nombre requerido');
-      const type = document.getElementById('acc_type').value;
-      const color= document.getElementById('acc_color').value||'#3a86ff';
-      const currency = document.getElementById('acc_ccy').value||'EUR';
-      const initBalance = parseFloat(document.getElementById('acc_init')?.value||'0')||0;
-      const liquidInit  = parseFloat(document.getElementById('acc_liq')?.value||'0')||0;
-
-      const idA = id();
-      const acc = {
-        id:idA, name, color, type, currency, createdAt:Date.now(),
-        initBalance: type==='normal'? initBalance:0,
-        balance:     type==='normal'? initBalance:0,
-        liquidInit:  type==='inversion'? liquidInit: undefined,
-        liquid:      type==='inversion'? liquidInit: undefined
-      };
-      try{ await db.ref(`finance/${UID}/accounts/${idA}`).set(acc); }catch(e){}
-      const store = lsGet(LS_KEY_FIN(), {entries:{}, accounts:{}}); store.accounts[idA]=acc; lsSet(LS_KEY_FIN(), store);
-      closeModal(); await loadAccounts(true); await recomputeDailyRange(idA, 7);
-    }
-  });
-};
-
-// === Activos (modales bonitos) ===
-
-// 1) Crear activo (modal) + opcional invertir ahora + refrescos de sumas/balances
-Fin.addAsset = function(){
-  const acc = ACC_CURRENT; if(!acc) return;
-  openModal({
-    title:'Nuevo activo',
-    submitText:'Guardar',
-    bodyHTML: `
-      <label class="field"><span>Nombre</span><input id="as_name" placeholder="AAPL / BTC / MSCI World"/></label>
-      <div class="row wrap">
-        <label class="field grow"><span>Tipo</span>
-          <select id="as_type"><option>stock</option><option>crypto</option><option>fund</option><option>otro</option></select>
-        </label>
-        <label class="field"><span>Moneda</span>
-          <select id="as_ccy">
-            <option ${acc.currency==='EUR'?'selected':''}>EUR</option>
-            <option ${acc.currency==='USD'?'selected':''}>USD</option>
-            <option ${acc.currency==='GBP'?'selected':''}>GBP</option>
-          </select>
-        </label>
-      </div>
-      <div class="row wrap">
-        <label class="field grow"><span>Invertir ahora</span><input id="as_invest" type="number" step="0.01" value="0"/></label>
-        <label class="field"><span>Comisión</span><input id="as_fee" type="number" step="0.01" value="0"/></label>
-      </div>
-    `,
-    onSubmit: async ()=>{
-      const name = document.getElementById('as_name').value.trim(); if(!name) return alert('Nombre requerido');
-      const type = document.getElementById('as_type').value || 'stock';
-      const currency = document.getElementById('as_ccy').value || acc.currency;
-      const invest = Math.max(0, parseFloat(document.getElementById('as_invest').value||'0')||0);
-      let   fee    = Math.max(0, parseFloat(document.getElementById('as_fee').value||'0')||0);
-      if(fee > invest) fee = invest;
-
-      const aId = id();
-      const asset = { id:aId, name, type, currency, invested:0, createdAt:Date.now() };
-      try{ await db.ref(`finance/${UID}/assets/${acc.id}/${aId}`).set(asset); }catch(e){ console.warn(e); }
-
-      if(invest>0){ await Fin._fromLiquid(acc.id, invest, currency, aId, fee); }
-
-      closeModal();
-      await loadAssetsSummary(true);
-      await Fin.renderAssets();
-      await Fin.refreshAccountHeader();
-      Fin.refreshAll();
-    }
-  });
-};
-
-// 2) Abrir activo (acciones)
-Fin.openAsset = async function(assetId){
-  const accId = ACC_CURRENT.id;
-  const s = await db.ref(`finance/${UID}/assets/${accId}/${assetId}`).once('value');
-  const a = s.val(); if(!a) return alert('Activo no encontrado');
-
-  openModal({
-    title:`${a.name} — ${a.type}`,
-    submitText:'Cerrar',
-    bodyHTML: `
-      <div class="row wrap">
-        <div class="chip">Moneda: ${a.currency||ACC_CURRENT.currency}</div>
-        <div class="chip">Invertido: ${euroLike(fx(a.invested||0, a.currency||ACC_CURRENT.currency, DISPLAY_CCY))}</div>
-      </div>
-      <div class="row" style="margin-top:8px; gap:8px">
-        <button class="pill" id="btnAdd">Aportar</button>
-        <button class="pill ghost" id="btnRet">Retirar a líquido</button>
-        <button class="pill danger" id="btnDel">Borrar</button>
-      </div>
-    `,
-    onSubmit: ()=>closeModal()
-  });
-
-  document.getElementById('btnAdd').onclick = async ()=>{
-    openModal({
-      title:`Aportar a ${a.name}`,
-      submitText:'Aportar',
-      bodyHTML: `
-        <div class="row wrap">
-          <label class="field grow"><span>Importe</span><input id="mov_amt" type="number" step="0.01"/></label>
-          <label class="field"><span>Comisión</span><input id="mov_fee" type="number" step="0.01" value="0"/></label>
-        </div>`,
-      onSubmit: async ()=>{
-        const amt = Math.max(0, parseFloat(document.getElementById('mov_amt').value||'0')||0);
-        let   fee = Math.max(0, parseFloat(document.getElementById('mov_fee').value||'0')||0);
-        if(amt<=0) return;
-        if(fee>amt) fee=amt;
-        await Fin._fromLiquid(accId, amt, a.currency||ACC_CURRENT.currency, a.id, fee);
-        closeModal();
-        await loadAssetsSummary(true);
-        await Fin.renderAssets();
-        await Fin.refreshAccountHeader();
-        Fin.refreshAll();
-      }
-    });
-  };
-
-  document.getElementById('btnRet').onclick = async ()=>{
-    openModal({
-      title:`Retirar de ${a.name} a Líquido`,
-      submitText:'Retirar',
-      bodyHTML:`<label class="field"><span>Importe</span><input id="mov_amt" type="number" step="0.01"/></label>`,
-      onSubmit: async ()=>{
-        const amt = Math.max(0, parseFloat(document.getElementById('mov_amt').value||'0')||0);
-        if(amt<=0) return;
-        await Fin._toLiquid(accId, amt, a.currency||ACC_CURRENT.currency, a.id);
-        closeModal();
-        await loadAssetsSummary(true);
-        await Fin.renderAssets();
-        await Fin.refreshAccountHeader();
-        Fin.refreshAll();
-      }
-    });
-  };
-
-  document.getElementById('btnDel').onclick = async ()=>{
-    openModal({
-      title:'Confirmar borrado',
-      submitText:'Borrar',
-      bodyHTML:`<div class="muted">Se eliminará el activo y su histórico invertido.</div>`,
-      onSubmit: async ()=>{
-        await db.ref(`finance/${UID}/assets/${accId}/${assetId}`).remove();
-        closeModal();
-        await loadAssetsSummary(true);
-        await Fin.renderAssets();
-        await Fin.refreshAccountHeader();
-        Fin.refreshAll();
-      }
-    });
-  };
-};
-
-// Traspaso desde líquido (modal selector)
-Fin.transferFromLiquid = async function(){
-  const acc = ACC_CURRENT; if(!acc) return;
-  const s = await db.ref(`finance/${UID}/assets/${acc.id}`).once('value');
-  const assets = s.val()||{}; const arr = Object.values(assets);
-  openModal({
-    title:'Traspasar desde Líquido',
-    submitText:'Traspasar',
-    bodyHTML: `
-      <label class="field"><span>Destino</span>
-        <select id="tr_dst">${arr.map(a=>`<option value="${a.id}">${a.name} (${a.currency||acc.currency})</option>`).join('')}</select>
-      </label>
-      <div class="row wrap">
-        <label class="field grow"><span>Importe</span><input id="tr_amt" type="number" step="0.01"/></label>
-        <label class="field"><span>Comisión</span><input id="tr_fee" type="number" step="0.01" value="0"/></label>
-      </div>
-    `,
-    onSubmit: async()=>{
-      const dstId = document.getElementById('tr_dst').value;
-      const dst = arr.find(x=>x.id===dstId); if(!dst) return alert('Activo no encontrado');
-      const amt = parseFloat(document.getElementById('tr_amt').value||'0')||0;
-      const fee = parseFloat(document.getElementById('tr_fee').value||'0')||0;
-      if(amt<=0) return;
-      await Fin._fromLiquid(acc.id, amt, dst.currency||acc.currency, dst.id, fee);
-      closeModal(); await Fin.renderAssets(); await Fin.refreshAccountHeader();
-    }
-  });
-};
-
-// FAB “＋” nuevo movimiento (modal rápido)
-Fin.quickAddMovement = function(){
-  const accOpts = Object.values(ACCOUNTS).map(a=>`<option value="${a.id}" data-ccy="${a.currency}">${a.name} (${a.currency})</option>`).join('');
-  openModal({
-    title:'Nuevo movimiento',
-    submitText:'Guardar',
-    bodyHTML: `
-      <label class="field"><span>Cuenta (origen)</span>
-        <select id="qm_acc">${accOpts}</select>
-      </label>
-      <div class="row wrap">
-        <label class="field grow"><span>Tipo</span>
-          <select id="qm_type">
-            <option value="gasto">Gasto</option>
-            <option value="ingreso">Ingreso</option>
-            <option value="salario">Salario</option>
-            <option value="inversion">Inversión</option>
-            <option value="traspaso">Traspaso</option>
-          </select>
-        </label>
-        <label class="field"><span>Categoría</span>
-          <select id="qm_cat">
-            <option>Comida</option><option>Transporte</option><option>Casa</option>
-            <option>Ocio</option><option>Salud</option><option>Otros</option>
-          </select>
-        </label>
-      </div>
-
-      <div id="qm_dest_wrap" class="hidden">
-        <label class="field"><span>Cuenta destino</span>
-          <select id="qm_dest">${accOpts}</select>
-        </label>
-      </div>
-
-      <label class="field"><span>Fecha</span><input id="qm_date" type="date" value="${new Date().toISOString().slice(0,10)}"/></label>
-      <div class="row wrap">
-        <label class="field grow"><span>Importe</span><input id="qm_amount" type="number" step="0.01"/></label>
-        <label class="field"><span>Moneda</span>
-          <select id="qm_ccy"><option>EUR</option><option>USD</option><option>GBP</option></select>
-        </label>
-      </div>
-      <label class="field"><span>Notas</span><input id="qm_note"/></label>
-    `,
-    onOpen: ()=>{
-      const acc = document.getElementById('qm_acc');
-      const ccy = document.getElementById('qm_ccy');
-      const typ = document.getElementById('qm_type');
-      const wrap= document.getElementById('qm_dest_wrap');
-      const dst = document.getElementById('qm_dest');
-
-      function syncCcy(){
-        const opt = acc.options[acc.selectedIndex];
-        ccy.value = opt?.dataset?.ccy || 'EUR';
-      }
-      function toggleDest(){
-        const isTransfer = typ.value==='traspaso';
-        wrap.classList.toggle('hidden', !isTransfer);
-        // evitar misma cuenta en destino
-        if(isTransfer){
-          const origin = acc.value;
-          [...dst.options].forEach(o=>o.disabled = (o.value===origin));
-          if(dst.value===origin) dst.value = ([...dst.options].find(o=>!o.disabled)?.value)||'';
-        }
-      }
-      acc.addEventListener('change', ()=>{ syncCcy(); toggleDest(); });
-      typ.addEventListener('change', toggleDest);
-      syncCcy(); toggleDest();
-    },
-    onSubmit: async ()=>{
-      const type = document.getElementById('qm_type').value;
-      const entry = {
-        accountId: document.getElementById('qm_acc').value,
-        type,
-        category: document.getElementById('qm_cat').value,
-        date: document.getElementById('qm_date').value,
-        amount: parseFloat(document.getElementById('qm_amount').value||'0')||0,
-        currency: document.getElementById('qm_ccy').value,
-        note: document.getElementById('qm_note').value||'',
-        ts: Date.now()
-      };
-      if(!entry.accountId) return alert('Selecciona cuenta origen');
-
-      if(type==='traspaso'){
-        entry.destAccountId = document.getElementById('qm_dest').value || '';
-        if(!entry.destAccountId) return alert('Selecciona cuenta destino');
-        if(entry.destAccountId === entry.accountId) return alert('Origen y destino no pueden coincidir');
-      }
-
-      const base = `finance/${UID}`; const eid = id();
-      try{ await db.ref(`${base}/entries/${eid}`).set({...entry,id:eid}); }catch(e){}
-      mirrorEntryLS({...entry,id:eid});
-
-      closeModal();
-      await loadEntries(true);
-      await loadAssetsSummary(true);
-      await recomputeDailyRange(entry.accountId, 60);
-      if(entry.destAccountId) await recomputeDailyRange(entry.destAccountId, 60);
-      await loadAccounts(true);
-      Fin.refreshAll();
-      if(ACC_CURRENT && (ACC_CURRENT.id===entry.accountId || ACC_CURRENT.id===entry.destAccountId)) await Fin.openAccount(ACC_CURRENT.id, true);
-    }
-  });
-};
-
-// 5) Render de movimientos: muestra “→ Cuenta destino” cuando aplique
-Fin.renderEntries = function(){
-  const type = val('fType');
-  const cat  = val('fCat');
-  const accF = val('fAcc');
-  const q    = (document.getElementById('fSearch')?.value||'').trim().toLowerCase();
-  const wrap = document.getElementById('entriesList');
-  wrap.innerHTML='';
-
-  const [from,to] = rangeDates();
-  const list = Object.values(ENTRIES)
-    .filter(e=>{
-      const d=new Date(e.date);
-      return d>=from && d<=to && (!type||e.type===type) && (!cat||e.category===cat) && (!accF||e.accountId===accF) && matchesQuery(e,q);
-    })
-    .sort((a,b)=>b.date.localeCompare(a.date) || b.ts-a.ts);
-
-  if(list.length===0){
-    const empty=document.createElement('div'); empty.className='card compact';
-    empty.innerHTML='<div class="muted">Sin movimientos. Pulsa ＋ Movimiento.</div>';
-    wrap.appendChild(empty); return;
-  }
-
-  const groups = {};
-  list.forEach(e=>{
-    const ym = e.date.slice(0,7);
-    (groups[ym] = groups[ym] || {items:[], inc:0, exp:0}).items.push(e);
-    const v = fx(e.amount, e.currency||'EUR', DISPLAY_CCY);
-    if(e.type==='gasto') groups[ym].exp += v;
-    if(['ingreso','salario','inversion'].includes(e.type)) groups[ym].inc += v;
-  });
-
-  Object.keys(groups).sort().reverse().forEach(ym=>{
-    const g = groups[ym];
-    const header=document.createElement('div'); header.className='card compact';
-    const monthLabel = monthHuman(ym);
-    const net = g.inc - g.exp;
-    header.innerHTML = `
-      <div class="row">
-        <div class="chip">${monthLabel}</div>
-        <div class="grow"></div>
-        <div class="chip info">Ingresos: ${euroLike(g.inc)}</div>
-        <div class="chip warn">Gastos: ${euroLike(g.exp)}</div>
-        <div class="chip ${net>=0?'ok':'bad'}">Saldo: ${euroLike(net)}</div>
-      </div>
-    `;
-    wrap.appendChild(header);
-
-    g.items.forEach(e=>{
-      const card=document.createElement('div'); card.className='card compact';
-      const dest = e.destAccountId ? `<div class="chip arrow">→ ${accountName(e.destAccountId)}</div>` : '';
-      card.innerHTML = `
-        <div class="row tight">
-          <div class="chip date">${e.date}</div>
-          <div class="chip">${ accountName(e.accountId) }</div>
-          <div class="chip">${e.type}</div>
-          ${e.category?`<div class="chip">${e.category}</div>`:''}
-          ${dest}
-          <div class="grow"></div>
-          <div class="chip amt ${e.type==='gasto'?'neg':'pos'}">
-            ${euroLike(fx(e.amount, e.currency||'EUR', DISPLAY_CCY))}
-          </div>
-        </div>
-        ${e.note?`<p class="muted small">${e.note}</p>`:''}
-        <div class="row"><button class="pill xs" onclick='Fin.openEdit("${e.id}", ${JSON.stringify(e).replace(/"/g,'&quot;')})'>Editar</button></div>
-      `;
-      wrap.appendChild(card);
-    });
-  });
-};
-
-
-function setupEntryEditorUI(prefDestId){
-  const typeSel   = document.getElementById('eType');
-  const originSel = document.getElementById('eAccount');
-  const destWrap  = document.getElementById('eDestWrap');
-  const destSel   = document.getElementById('eDestAccount');
-
-  function refillDest(){
-    fillAccountsSelect('eDestAccount');
-    // quita placeholder
-    const opt0 = destSel.querySelector('option[value=""]'); if(opt0) opt0.remove();
-    // deshabilita misma cuenta que origen
-    [...destSel.options].forEach(o => o.disabled = (o.value === originSel.value));
-    if(prefDestId){ destSel.value = prefDestId; }
-    if(destSel.value === originSel.value){
-      const first = [...destSel.options].find(o=>!o.disabled);
-      destSel.value = first ? first.value : '';
-    }
-  }
-  function toggle(){
-    const isTransfer = typeSel.value === 'traspaso';
-    destWrap.classList.toggle('hidden', !isTransfer);
-    if(isTransfer) refillDest();
-  }
-  originSel.addEventListener('change', toggle);
-  typeSel.addEventListener('change', toggle);
-  toggle();
-}
