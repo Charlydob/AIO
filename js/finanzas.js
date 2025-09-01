@@ -25,6 +25,21 @@ const FX = { // tasas simple editables
   GBP:{EUR:1.18, USD:1.3, GBP:1}
 };
 
+let ANALYTICS_ACC = ''; // '' = todas
+
+function populateAnalyticsAccounts(){
+  const sel = document.getElementById('aAcc'); if(!sel) return;
+  const keep = sel.value || ANALYTICS_ACC || '';
+  sel.innerHTML = '<option value="">Todas las cuentas</option>';
+  Object.values(ACCOUNTS).forEach(a=>{
+    const o = document.createElement('option');
+    o.value = a.id; o.textContent = a.name;
+    sel.appendChild(o);
+  });
+  sel.value = keep;
+  ANALYTICS_ACC = sel.value; // sincroniza
+}
+
 function fx(amount, from, to){ from=from||'EUR'; to=to||'EUR'; return +(amount * (FX?.[from]?.[to]||1)).toFixed(2); }
 function euroLike(amount, ccy=DISPLAY_CCY){ const s = new Intl.NumberFormat('es-ES',{style:'currency', currency:ccy}).format(amount||0); return s; }
 
@@ -666,10 +681,12 @@ const Fin = {
 
   async refreshAll(){
     renderAccounts();
-    populateFilterAccounts();
-    updateStats();
-    drawNetWorth();
-    drawAnalytics();
+  fillAccountsSelect('eAccount');
+  populateFilterAccounts();
+  populateAnalyticsAccounts();   // ← NUEVO
+  updateStats();
+  drawNetWorth();
+  drawAnalytics();
   },
 
   // Reset + búsqueda en vista de cuenta
@@ -888,17 +905,35 @@ function drawAnalytics(){
   if(charts.cat) charts.cat.destroy();
 
   const [from,to] = rangeDates();
-  let inc=0, exp=0; const catMap={};
+  const accFilter = ANALYTICS_ACC; // '' = todas
+
+  let inc=0, exp=0;
+  const catMap = {};
+
   Object.values(ENTRIES).forEach(e=>{
-    const d=new Date(e.date); if(d<from||d>to) return;
+    const d=new Date(e.date);
+    if(d<from||d>to) return;
+    if(accFilter && e.accountId!==accFilter) return;
     const v = fx(e.amount, e.currency||'EUR', DISPLAY_CCY);
     if(['ingreso','salario','inversion'].includes(e.type)) inc+=v;
-    if(e.type==='gasto'){ exp+=v; catMap[e.category]= (catMap[e.category]||0)+v; }
+    else if(e.type==='gasto'){ exp+=v; catMap[e.category]=(catMap[e.category]||0)+v; }
   });
 
-  charts.incExp = new Chart(ctx1,{ type:'bar', data:{ labels:['Ingresos','Gastos'], datasets:[{data:[inc,exp]}] }, options:{ responsive:true, scales:{y:{beginAtZero:true}} } });
-  charts.cat    = new Chart(ctx2,{ type:'pie', data:{ labels:Object.keys(catMap), datasets:[{data:Object.values(catMap)}] }, options:{ responsive:true } });
+  const title = accFilter ? `(${accountName(accFilter)})` : '(Todas)';
+
+  charts.incExp = new Chart(ctx1,{
+    type:'bar',
+    data:{ labels:['Ingresos','Gastos'], datasets:[{data:[inc,exp]}] },
+    options:{ responsive:true, scales:{y:{beginAtZero:true}}, plugins:{legend:{display:false}, title:{display:true, text:`Ingresos vs Gastos ${title}`}} }
+  });
+  charts.cat = new Chart(ctx2,{
+    type:'pie',
+    data:{ labels:Object.keys(catMap), datasets:[{data:Object.values(catMap)}] },
+    options:{ responsive:true, plugins:{ title:{display:true, text:`Gasto por categoría ${title}`} } }
+  });
 }
+
+
 
 // ---------- Carga y espejo ----------
 async function loadEntries(preferRTDB=true){

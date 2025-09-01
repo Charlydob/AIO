@@ -103,14 +103,22 @@
       </div>
     </section>
 
-    <section id="tab-analytics" class="view">
-      <div class="sheet">
-        <h3>Ingresos vs Gastos</h3>
-        <canvas id="incExpChart" height="200"></canvas>
-        <h3>Gasto por categoría (rango)</h3>
-        <canvas id="catPieChart" height="200"></canvas>
-      </div>
-    </section>
+<section id="tab-analytics" class="view">
+  <div class="sheet">
+    <div class="row wrap" style="gap:8px;margin-bottom:8px">
+      <select id="aAcc" onchange="Fin.onAnalyticsAccChange(this.value)">
+        <option value="">Todas las cuentas</option>
+      </select>
+      <div class="grow"></div>
+    </div>
+
+    <h3>Ingresos vs Gastos</h3>
+    <canvas id="incExpChart" height="200"></canvas>
+
+    <h3>Gasto por categoría (rango)</h3>
+    <canvas id="catPieChart" height="200"></canvas>
+  </div>
+</section>
 
     <!-- EDITOR DE MOVIMIENTO (vista antigua; no se usa si trabajas solo con modal, pero no molesta) -->
     <section id="entry-editor" class="view">
