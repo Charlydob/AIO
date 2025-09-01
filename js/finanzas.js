@@ -326,6 +326,11 @@ const Fin = {
   setDisplayCurrency(v){ DISPLAY_CCY=v; Fin.refreshAll(); if(ACC_CURRENT) Fin.openAccount(ACC_CURRENT.id,true); },
   onRangeChange(v){ RANGE=v; Fin.refreshAll(); },
 
+  onAnalyticsAccChange(v){
+    ANALYTICS_ACC = v || '';
+    drawAnalytics();
+  },
+
   switchTab(name){
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     document.querySelector(`.tab[data-tab="${name}"]`).classList.add('active');
