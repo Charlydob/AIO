@@ -156,8 +156,8 @@ function movementModalHTML(entry={}, mode='create'){
       </label>
       <label class="field"><span>Categoría</span>
         <select id="mv_cat">
-          <option>Comida</option><option>Transporte</option><option>Casa</option>
-          <option>Ocio</option><option>Salud</option><option>Otros</option>
+          <option>Comida</option><option>Capricho</option><option>Casa</option>
+          <option>Ocio</option><option>Util</option><option>Otros</option>
         </select>
       </label>
     </div>
