@@ -925,18 +925,95 @@ function drawAnalytics(){
   });
 
   const title = accFilter ? `(${accountName(accFilter)})` : '(Todas)';
+  const pctSpent = inc>0 ? +(exp/inc*100).toFixed(1) : 0;
 
+  // --- Plugins ligeros de etiquetas ---
+  const labelPluginIncExp = {
+    id:'labelPluginIncExp',
+    afterDatasetsDraw(chart){
+      const {ctx} = chart;
+      const meta = chart.getDatasetMeta(0);
+      if(!meta?.data?.length) return;
+
+      const incPoint = meta.data[0]?.tooltipPosition?.();
+      const expPoint = meta.data[1]?.tooltipPosition?.();
+
+      ctx.save();
+      ctx.textAlign='center';
+      ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+
+      // Ingresos: solo cantidad €
+      if(incPoint){
+        ctx.textBaseline='bottom';
+        ctx.fillText(euroLike(inc, DISPLAY_CCY), incPoint.x, incPoint.y - 4);
+      }
+
+      // Gastos: cantidad € y debajo % de ingresos gastados
+      if(expPoint){
+        ctx.textBaseline='bottom';
+        ctx.fillText(euroLike(exp, DISPLAY_CCY), expPoint.x, expPoint.y - 4);
+        ctx.textBaseline='top';
+        const txt = inc>0 ? `(${pctSpent}% de ingresos)` : '(—)';
+        ctx.fillText(txt, expPoint.x, expPoint.y + 4);
+      }
+      ctx.restore();
+    }
+  };
+
+  const piePercentPlugin = {
+    id:'piePercentPlugin',
+    afterDatasetsDraw(chart){
+      const {ctx} = chart;
+      const ds = chart.data.datasets[0];
+      const meta = chart.getDatasetMeta(0);
+      if(!ds?.data?.length) return;
+      const total = ds.data.reduce((a,b)=>a+(+b||0),0) || 1;
+
+      ctx.save();
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      meta.data.forEach((el,i)=>{
+        const val = +ds.data[i]||0; if(val<=0) return;
+        const p = el.tooltipPosition();
+        const pct = +(val/total*100).toFixed(1);
+        ctx.fillText(`${pct}%`, p.x, p.y);
+      });
+      ctx.restore();
+    }
+  };
+
+  // --- Bar: Ingresos vs Gastos ---
   charts.incExp = new Chart(ctx1,{
     type:'bar',
     data:{ labels:['Ingresos','Gastos'], datasets:[{data:[inc,exp]}] },
-    options:{ responsive:true, scales:{y:{beginAtZero:true}}, plugins:{legend:{display:false}, title:{display:true, text:`Ingresos vs Gastos ${title}`}} }
+    options:{
+      responsive:true,
+      scales:{ y:{ beginAtZero:true } },
+      plugins:{
+        legend:{ display:false },
+        title:{ display:true, text:`Ingresos vs Gastos ${title}` },
+        subtitle:{ display:true, text:`Total ingresos: ${euroLike(inc)}   •   Total gastos: ${euroLike(exp)}${inc>0?`   •   % gastado: ${pctSpent}%`:''}` }
+      }
+    },
+    plugins:[labelPluginIncExp]
   });
+
+  // --- Pie: gasto por categoría con % en cada porción ---
   charts.cat = new Chart(ctx2,{
     type:'pie',
     data:{ labels:Object.keys(catMap), datasets:[{data:Object.values(catMap)}] },
-    options:{ responsive:true, plugins:{ title:{display:true, text:`Gasto por categoría ${title}`} } }
+    options:{
+      responsive:true,
+      plugins:{
+        title:{ display:true, text:`Gasto por categoría ${title}` },
+        legend:{ position:'bottom' }
+      }
+    },
+    plugins:[piePercentPlugin]
   });
 }
+
 
 
 
